@@ -1,0 +1,52 @@
+appId: com.ewords.dictation
+productName: Ewords Dictation
+copyright: Copyright © 2026 Ewords Dictation
+
+directories:
+  output: release/windows
+  buildResources: build
+
+asar: true
+afterPack: scripts/after-pack.cjs
+
+files:
+  - package.json
+  - apps/desktop/dist/**/*
+  - apps/desktop/dist-electron/**/*
+
+extraResources:
+  - from: build/icon.ico
+    to: build/icon.ico
+  - from: data/processed/dictation.sqlite
+    to: data/processed/dictation.sqlite
+  - from: data/migrations/0001_init.sql
+    to: data/migrations/0001_init.sql
+  - from: data/export/tatoeba_examples_and_attribution.csv
+    to: data/export/tatoeba_examples_and_attribution.csv
+  - from: release/resources/tts
+    to: tts
+  - from: release/resources/licenses
+    to: licenses
+
+win:
+  icon: build/icon.ico
+  signAndEditExecutable: false
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Ewords Dictation
+
+portable:
+  artifactName: ${productName}-${version}-portable-${arch}.${ext}

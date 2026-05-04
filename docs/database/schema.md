@@ -1,0 +1,29 @@
+# Database Schema
+
+The SQLite migration is `data/migrations/0001_init.sql`.
+
+Implemented tables:
+
+- `dictionary_entries`
+- `dictionary_examples`
+- `vocabulary_libraries`
+- `vocabulary_units`
+- `vocabulary_words`
+- `vocabulary_word_units`
+- `dictation_sessions`
+- `dictation_results`
+- `wrong_book_words`
+- `favorite_words`
+- `app_settings`
+- `search_history`
+- `import_tasks`
+- `import_preview_rows`
+
+Run:
+
+```bash
+corepack pnpm db:migrate
+corepack pnpm db:seed
+```
+
+The seed script reads from `data/raw`, not `codex/`.

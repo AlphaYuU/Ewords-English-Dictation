@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@dictation/ui": ["packages/ui/src/index.ts"],
+      "@dictation/design-tokens": ["packages/design-tokens/src/index.ts"],
+      "@dictation/domain": ["packages/domain/src/index.ts"],
+      "@dictation/data-access": ["packages/data-access/src/index.ts"],
+      "@dictation/dictation-engine": ["packages/dictation-engine/src/index.ts"],
+      "@dictation/dictionary-engine": ["packages/dictionary-engine/src/index.ts"],
+      "@dictation/import-export": ["packages/import-export/src/index.ts"],
+      "@dictation/audio": ["packages/audio/src/index.ts"],
+      "@dictation/shared": ["packages/shared/src/index.ts"]
+    }
+  },
+  "include": [
+    "apps/desktop/src",
+    "apps/desktop/electron",
+    "packages/*/src",
+    "scripts/**/*.ts",
+    "tests/**/*.ts"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "outDir": "../dist-electron",
+    "rootDir": ".",
+    "noEmit": false,
+    "types": ["node", "electron"],
+    "lib": ["ES2023"]
+  },
+  "include": ["main/**/*.ts", "preload/**/*.ts", "ipc/**/*.ts"]
+}

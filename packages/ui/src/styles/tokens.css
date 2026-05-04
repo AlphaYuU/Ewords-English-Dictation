@@ -1,0 +1,26 @@
+:root {
+  --accent-primary: #d4916e;
+  --accent-primary-dark: #b87553;
+  --accent-secondary: #e8b093;
+  --accent-warning: #e0b068;
+  --accent-error: #c77b6a;
+  --accent-success: #7da37e;
+  --foreground-primary: #1a1a1a;
+  --foreground-secondary: #3d3d3d;
+  --foreground-tertiary: #7a7065;
+  --foreground-muted: #a89880;
+  --foreground-inverse: #ffffff;
+  --surface-primary: #fbf6ef;
+  --surface-card: #ffffff;
+  --surface-muted: #f3ebe2;
+  --surface-selected: #fff6ee;
+  --surface-danger-muted: #f8e5df;
+  --surface-success-muted: #e5f0e1;
+  --border-subtle: #e2d5c5;
+  --border-muted: #c7bba9;
+  --overlay-dialog-scrim: #1a1a1ab3;
+  --shadow-card: 0 8px 24px rgba(26, 26, 26, 0.06);
+  --shadow-dialog: 0 24px 80px rgba(26, 26, 26, 0.18);
+  --font-display: "Noto Serif SC", "Songti SC", "SimSun", Georgia, serif;
+  --font-body: "Noto Serif SC", "Songti SC", "SimSun", Georgia, serif;
+}

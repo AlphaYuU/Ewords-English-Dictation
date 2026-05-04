@@ -1,0 +1,9 @@
+book_code,book_name,book_name_en,source_tag,unit_strategy,word_count,words_with_examples,example_count,csv_file
+ielts,雅思词库,IELTS Vocabulary,ielts,单一默认单元：全部,5040,3100,5379,official_vocab_books/official_ielts.csv
+toefl,托福词库,TOEFL Vocabulary,toefl,单一默认单元：全部,6974,2899,4771,official_vocab_books/official_toefl.csv
+ky,考研英语词库,Postgraduate Entrance English Vocabulary,ky,单一默认单元：全部,4801,3417,6001,official_vocab_books/official_ky.csv
+cet4,大学英语四级词库,CET-4 Vocabulary,cet4,单一默认单元：全部,3849,3094,5590,official_vocab_books/official_cet4.csv
+cet6,大学英语六级词库,CET-6 Vocabulary,cet6,单一默认单元：全部,5407,3512,6034,official_vocab_books/official_cet6.csv
+gre,GRE 词库,GRE Vocabulary,gre,单一默认单元：全部,7504,1666,2493,official_vocab_books/official_gre.csv
+gk,高考英语词库,Gaokao English Vocabulary,gk,单一默认单元：全部,3677,3242,6134,official_vocab_books/official_gk.csv
+zk,中考英语词库,Zhongkao English Vocabulary,zk,单一默认单元：全部,1603,1567,3095,official_vocab_books/official_zk.csv

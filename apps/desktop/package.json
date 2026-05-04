@@ -1,0 +1,24 @@
+{
+  "name": "@dictation/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main/main.js",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "dev:electron": "tsx electron/main/main.ts",
+    "build": "vite build && tsc -p electron/tsconfig.json && node ../../scripts/write-electron-preload-cjs.mjs",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@dictation/audio": "workspace:*",
+    "@dictation/data-access": "workspace:*",
+    "@dictation/design-tokens": "workspace:*",
+    "@dictation/dictation-engine": "workspace:*",
+    "@dictation/dictionary-engine": "workspace:*",
+    "@dictation/domain": "workspace:*",
+    "@dictation/import-export": "workspace:*",
+    "@dictation/shared": "workspace:*",
+    "@dictation/ui": "workspace:*"
+  }
+}
