@@ -877,6 +877,18 @@ button:disabled {
   align-items: center;
 }
 
+.history-table-header {
+  padding-right: 35px;
+}
+
+.history-table-grid > span:nth-child(n + 2) {
+  justify-self: center;
+}
+
+.history-table-grid > span:first-child {
+  justify-self: stretch;
+}
+
 .history-table-body {
   height: 348px;
   max-height: 348px;
@@ -2551,6 +2563,30 @@ button:disabled {
   color: var(--foreground-tertiary);
 }
 
+.import-file-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.import-target-select {
+  width: 220px;
+}
+
+.import-target-button {
+  height: 46px;
+  box-shadow: none;
+}
+
+.import-target-menu {
+  z-index: 80;
+}
+
+.import-format-hint span {
+  display: block;
+}
+
 .add-word-search-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 180px;
@@ -3013,10 +3049,13 @@ button:disabled {
 }
 
 .pronunciation-button svg {
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  padding: 3px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.88);
   color: var(--accent-primary);
-  transform: scale(0.86);
 }
 
 .word-hero-actions {

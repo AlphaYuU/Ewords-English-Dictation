@@ -116,10 +116,13 @@ export type PracticeSetup = {
   accent: Accent;
   orderMode: OrderMode;
   sampleCount?: number;
+  sampleWordIds?: ID[];
   showChineseHint: boolean;
   playbackSettings: PlaybackSettings;
   gradingRules: GradingRules;
 };
+
+export type PracticeSessionSettings = Omit<PracticeSetup, "source">;
 
 export type SessionWord = {
   orderIndex: number;
@@ -139,6 +142,8 @@ export type DictationSession = {
   accent: Accent;
   status: DictationSessionStatus;
   wordCount: number;
+  currentIndex?: number;
+  settings?: PracticeSessionSettings;
   durationSec: number;
   pausedDurationSec?: number;
   pausedAt?: number;

@@ -39,7 +39,7 @@ function ShellContent() {
   const pausedSession = useMemo(
     () =>
       sessions
-        .filter((session) => session.status === "paused")
+        .filter((session) => session.status === "paused" || session.status === "active")
         .sort((left, right) => (right.pausedAt ?? right.createdAt) - (left.pausedAt ?? left.createdAt))[0],
     [sessions],
   );

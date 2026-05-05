@@ -1,8 +1,13 @@
 import type { PracticeSetup, SessionWord, VocabularyWord } from "@dictation/domain";
 
 export function orderSessionWords(words: VocabularyWord[], setup: PracticeSetup): SessionWord[] {
-  const source = setup.orderMode === "random" ? shuffle(words) : words.slice();
-  const selected = setup.orderMode === "sample" ? source.slice(0, setup.sampleCount ?? source.length) : source;
+  const source = setup.orderMode === "random" || setup.orderMode === "sample" ? shuffle(words) : words.slice();
+  const selected =
+    setup.orderMode === "sample" && setup.sampleWordIds?.length
+      ? setup.sampleWordIds.map((wordId) => words.find((word) => word.id === wordId)).filter((word): word is VocabularyWord => Boolean(word))
+      : setup.orderMode === "sample"
+        ? source.slice(0, setup.sampleCount ?? source.length)
+        : source;
   return selected.map((word, index) => ({
     orderIndex: index,
     wordId: word.id,

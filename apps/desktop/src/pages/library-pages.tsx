@@ -11,6 +11,7 @@ export function LibraryShelfPage() {
   const libraries = useLibraryStore((state) => state.libraries);
   const words = useLibraryStore((state) => state.words);
   const openDialog = useLibraryStore((state) => state.openDialog);
+  const setSelectedLibraryId = useLibraryStore((state) => state.setSelectedLibraryId);
   const system = libraries.filter((library) => library.type === "wrong_book" || library.type === "favorite");
   const shelf = libraries.filter((library) => library.type === "official" || library.type === "custom");
   const visibleShelf = shelfFilter === "custom" ? shelf.filter((library) => library.type === "custom") : shelf;
@@ -26,7 +27,17 @@ export function LibraryShelfPage() {
         </div>
         <div className="page-actions">
           <Button variant="ghost" size="sm" onClick={() => navigate("/library/edit")}>编辑</Button>
-          <Button variant="ghost" size="sm" iconStart={<Icon name="upload" />} onClick={() => openDialog("import-file")}>导入词库</Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            iconStart={<Icon name="upload" />}
+            onClick={() => {
+              setSelectedLibraryId(null);
+              openDialog("import-file");
+            }}
+          >
+            导入单词
+          </Button>
           <Button variant="primary" size="sm" iconStart={<Icon name="plus" />} onClick={() => openDialog("create-library")}>新建词库</Button>
         </div>
       </header>
@@ -182,15 +193,18 @@ export function LibraryEditPage() {
 export function LibraryDetailPage() {
   const { libraryId = "10" } = useParams();
   const navigate = useNavigate();
-  const [wordFilter, setWordFilter] = useState<"all" | "mastered" | "wrong">("all");
-  const [sortField, setSortField] = useState<"word" | "added" | "mastery" | "wrong">("word");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  const listStateKey = `library:${libraryId}`;
+  const initialListUiState = useMemo(() => useLibraryStore.getState().libraryListUiState[listStateKey], [listStateKey]);
+  const [wordFilter, setWordFilter] = useState<"all" | "mastered" | "wrong">(() => initialListUiState?.wordFilter ?? "all");
+  const [sortField, setSortField] = useState<"word" | "added" | "mastery" | "wrong">(() => initialListUiState?.sortField ?? "word");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">(() => initialListUiState?.sortOrder ?? "asc");
   const [openMenu, setOpenMenu] = useState<"field" | "order" | null>(null);
-  const [detailSearch, setDetailSearch] = useState("");
+  const [detailSearch, setDetailSearch] = useState(() => initialListUiState?.appliedSearch ?? "");
   const debouncedDetailSearch = useDebouncedValue(detailSearch, 80);
-  const [appliedSearch, setAppliedSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState(() => initialListUiState?.appliedSearch ?? "");
   const [detailSearchOpen, setDetailSearchOpen] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<VocabularyWord | null>(null);
+  const scrollTopRef = useRef(initialListUiState?.scrollTop ?? 0);
   const sortControlsRef = useRef<HTMLDivElement>(null);
   const detailSearchRef = useRef<HTMLDivElement>(null);
   const library = useLibraryStore((state) => state.libraries.find((item) => item.id === Number(libraryId)));
@@ -212,6 +226,18 @@ export function LibraryDetailPage() {
   const setPracticeSource = useLibraryStore((state) => state.setPracticeSource);
   const toggleFavorite = useLibraryStore((state) => state.toggleFavorite);
   const openDialog = useLibraryStore((state) => state.openDialog);
+  const setLibraryListUiState = useLibraryStore((state) => state.setLibraryListUiState);
+  const saveListUiState = (patch: { activeWordId?: number; scrollTop?: number; wordFilter?: "all" | "mastered" | "wrong"; sortField?: "word" | "added" | "mastery" | "wrong"; sortOrder?: "asc" | "desc"; appliedSearch?: string } = {}) => {
+    setLibraryListUiState(listStateKey, {
+      scrollTop: scrollTopRef.current,
+      activeWordId: initialListUiState?.activeWordId,
+      wordFilter,
+      sortField,
+      sortOrder,
+      appliedSearch,
+      ...patch,
+    });
+  };
   useEffect(() => {
     if (!openMenu && !detailSearchOpen) return;
     const closeMenu = (event: PointerEvent) => {
@@ -250,9 +276,18 @@ export function LibraryDetailPage() {
       </section>
       <div className="toolbar-row">
         <div className="chip-row">
-          <Chip selected={wordFilter === "all"} onClick={() => setWordFilter("all")}>全部 ({words.length.toLocaleString()})</Chip>
-          <Chip selected={wordFilter === "mastered"} onClick={() => setWordFilter("mastered")}>已掌握 ({masteredCount.toLocaleString()})</Chip>
-          <Chip selected={wordFilter === "wrong"} onClick={() => setWordFilter("wrong")}>错词 ({wrongCount.toLocaleString()})</Chip>
+          <Chip selected={wordFilter === "all"} onClick={() => {
+            setWordFilter("all");
+            saveListUiState({ wordFilter: "all" });
+          }}>全部 ({words.length.toLocaleString()})</Chip>
+          <Chip selected={wordFilter === "mastered"} onClick={() => {
+            setWordFilter("mastered");
+            saveListUiState({ wordFilter: "mastered" });
+          }}>已掌握 ({masteredCount.toLocaleString()})</Chip>
+          <Chip selected={wordFilter === "wrong"} onClick={() => {
+            setWordFilter("wrong");
+            saveListUiState({ wordFilter: "wrong" });
+          }}>错词 ({wrongCount.toLocaleString()})</Chip>
         </div>
         <div className="page-actions">
           <div className="sort-controls" ref={sortControlsRef}>
@@ -265,6 +300,7 @@ export function LibraryDetailPage() {
                   {(["word", "added", "mastery", "wrong"] as const).map((field) => (
                     <button type="button" key={field} onClick={() => {
                       setSortField(field);
+                      saveListUiState({ sortField: field });
                       setOpenMenu(null);
                     }}>{sortFieldLabel(field)}</button>
                   ))}
@@ -279,10 +315,12 @@ export function LibraryDetailPage() {
                 <div className="sort-menu">
                   <button type="button" onClick={() => {
                     setSortOrder("asc");
+                    saveListUiState({ sortOrder: "asc" });
                     setOpenMenu(null);
                   }}>升序</button>
                   <button type="button" onClick={() => {
                     setSortOrder("desc");
+                    saveListUiState({ sortOrder: "desc" });
                     setOpenMenu(null);
                   }}>降序</button>
                 </div>
@@ -297,10 +335,15 @@ export function LibraryDetailPage() {
               onChange={(value) => {
                 setDetailSearch(value);
                 setDetailSearchOpen(true);
-                if (!value.trim()) setAppliedSearch("");
+                if (!value.trim()) {
+                  setAppliedSearch("");
+                  saveListUiState({ appliedSearch: "" });
+                }
               }}
               onSubmit={() => {
-                setAppliedSearch(detailSearch.trim());
+                const nextSearch = detailSearch.trim();
+                setAppliedSearch(nextSearch);
+                saveListUiState({ appliedSearch: nextSearch });
                 setDetailSearchOpen(false);
               }}
               placeholder="在该词库中搜索..."
@@ -308,7 +351,10 @@ export function LibraryDetailPage() {
             {detailSearchOpen && detailSearch.trim() ? (
               <div className="search-suggest-panel page-suggest-panel">
                 {detailSearchResults.length ? detailSearchResults.map((word) => (
-                  <button type="button" key={word.id} onClick={() => navigate(`/words/${word.id}`)}>
+                  <button type="button" key={word.id} onClick={() => {
+                    saveListUiState({ activeWordId: word.id });
+                    navigate(`/words/${word.id}`);
+                  }}>
                     <strong>{word.word}</strong>
                     <span>{word.meaning}</span>
                   </button>
@@ -324,7 +370,16 @@ export function LibraryDetailPage() {
       </div>
       <WordTable
         words={visibleWords}
-        onWordClick={(word) => navigate(`/words/${word.id}`)}
+        activeId={initialListUiState?.activeWordId}
+        initialScrollTop={initialListUiState?.scrollTop}
+        onScrollTopChange={(scrollTop) => {
+          scrollTopRef.current = scrollTop;
+          saveListUiState({ scrollTop });
+        }}
+        onWordClick={(word) => {
+          saveListUiState({ activeWordId: word.id });
+          navigate(`/words/${word.id}`);
+        }}
         onFavorite={(word) => toggleFavorite(word.id)}
         onAction={(word) => setPendingRemove(word)}
         actionLabel="移出"
@@ -346,15 +401,22 @@ export function LibraryDetailPage() {
 }
 
 export function LibraryDetailEmptyPage() {
+  const { libraryId = "" } = useParams();
   const openDialog = useLibraryStore((state) => state.openDialog);
+  const setSelectedLibraryId = useLibraryStore((state) => state.setSelectedLibraryId);
+  const currentLibraryId = Number(libraryId);
+  const openLibraryDialog = (dialog: "add-word-search" | "import-file") => {
+    if (Number.isFinite(currentLibraryId)) setSelectedLibraryId(currentLibraryId);
+    openDialog(dialog);
+  };
   return (
     <EmptyState
       title="词库还是空的"
-      description="添加单词或导入词表后，就可以从这里开始听写。"
+      description="添加单词或导入单词后，就可以从这里开始听写。"
       action={
         <div className="page-actions">
-          <Button variant="primary" size="lg" iconStart={<Icon name="plus" />} onClick={() => openDialog("add-word-search")}>添加单词</Button>
-          <Button variant="secondary" size="lg" iconStart={<Icon name="upload" />} onClick={() => openDialog("import-file")}>导入词表</Button>
+          <Button variant="primary" size="lg" iconStart={<Icon name="plus" />} onClick={() => openLibraryDialog("add-word-search")}>添加单词</Button>
+          <Button variant="secondary" size="lg" iconStart={<Icon name="upload" />} onClick={() => openLibraryDialog("import-file")}>导入单词</Button>
         </div>
       }
     />
@@ -363,11 +425,22 @@ export function LibraryDetailEmptyPage() {
 
 export function FavoriteLibraryPage() {
   const navigate = useNavigate();
+  const listStateKey = "favorites";
+  const initialListUiState = useMemo(() => useLibraryStore.getState().libraryListUiState[listStateKey], []);
+  const scrollTopRef = useRef(initialListUiState?.scrollTop ?? 0);
   const [pendingRemove, setPendingRemove] = useState<VocabularyWord | null>(null);
   const allWords = useLibraryStore((state) => state.words);
   const words = useMemo(() => dedupeWordsByIdentity(allWords.filter((word) => word.isFavorite)), [allWords]);
   const toggleFavorite = useLibraryStore((state) => state.toggleFavorite);
   const setPracticeSource = useLibraryStore((state) => state.setPracticeSource);
+  const setLibraryListUiState = useLibraryStore((state) => state.setLibraryListUiState);
+  const saveListUiState = (patch: { activeWordId?: number; scrollTop?: number } = {}) => {
+    setLibraryListUiState(listStateKey, {
+      scrollTop: scrollTopRef.current,
+      activeWordId: initialListUiState?.activeWordId,
+      ...patch,
+    });
+  };
   if (!words.length) return <FavoriteLibraryEmptyPage />;
   return (
     <>
@@ -383,7 +456,23 @@ export function FavoriteLibraryPage() {
           }}
         >开始听写</Button>
       </header>
-      <WordTable words={words} visibleRows={15} onWordClick={(word) => navigate(word.libraryId === 0 && word.dictionaryEntryId ? `/dictionary/entry/${word.dictionaryEntryId}` : `/words/${word.id}`)} onFavorite={(word) => toggleFavorite(word.id)} onAction={setPendingRemove} actionLabel="移出" />
+      <WordTable
+        words={words}
+        visibleRows={15}
+        activeId={initialListUiState?.activeWordId}
+        initialScrollTop={initialListUiState?.scrollTop}
+        onScrollTopChange={(scrollTop) => {
+          scrollTopRef.current = scrollTop;
+          saveListUiState({ scrollTop });
+        }}
+        onWordClick={(word) => {
+          saveListUiState({ activeWordId: word.id });
+          navigate(word.libraryId === 0 && word.dictionaryEntryId ? `/dictionary/entry/${word.dictionaryEntryId}` : `/words/${word.id}`);
+        }}
+        onFavorite={(word) => toggleFavorite(word.id)}
+        onAction={setPendingRemove}
+        actionLabel="移出"
+      />
       <NoticeDialog
         open={Boolean(pendingRemove)}
         title="移出收藏"
@@ -402,17 +491,28 @@ export function FavoriteLibraryPage() {
 
 export function WrongBookPage() {
   const navigate = useNavigate();
+  const listStateKey = "wrong-book";
+  const initialListUiState = useMemo(() => useLibraryStore.getState().libraryListUiState[listStateKey], []);
+  const scrollTopRef = useRef(initialListUiState?.scrollTop ?? 0);
   const [pendingRemove, setPendingRemove] = useState<VocabularyWord | null>(null);
   const allWords = useLibraryStore((state) => state.words);
   const words = useMemo(() => dedupeWordsByIdentity(allWords.filter((word) => word.inWrongBook)), [allWords]);
   const toggleFavorite = useLibraryStore((state) => state.toggleFavorite);
   const toggleWrongBook = useLibraryStore((state) => state.toggleWrongBook);
   const setPracticeSource = useLibraryStore((state) => state.setPracticeSource);
+  const setLibraryListUiState = useLibraryStore((state) => state.setLibraryListUiState);
+  const saveListUiState = (patch: { activeWordId?: number; scrollTop?: number } = {}) => {
+    setLibraryListUiState(listStateKey, {
+      scrollTop: scrollTopRef.current,
+      activeWordId: initialListUiState?.activeWordId,
+      ...patch,
+    });
+  };
   if (!words.length) return <WrongBookEmptyPage />;
   return (
     <>
       <header className="page-topbar">
-        <div><h1 className="page-title">错题本</h1><p className="page-subtitle">{words.length}词</p></div>
+        <div><h1 className="page-title">错题本</h1><p className="page-subtitle">{words.length} 词 · 掌握度满后自动移出</p></div>
         <Button
           variant="danger"
           size="sm"
@@ -425,7 +525,16 @@ export function WrongBookPage() {
       </header>
       <WordTable
         words={words}
-        onWordClick={(word) => navigate(word.libraryId === 0 && word.dictionaryEntryId ? `/dictionary/entry/${word.dictionaryEntryId}` : `/words/${word.id}`)}
+        activeId={initialListUiState?.activeWordId}
+        initialScrollTop={initialListUiState?.scrollTop}
+        onScrollTopChange={(scrollTop) => {
+          scrollTopRef.current = scrollTop;
+          saveListUiState({ scrollTop });
+        }}
+        onWordClick={(word) => {
+          saveListUiState({ activeWordId: word.id });
+          navigate(word.libraryId === 0 && word.dictionaryEntryId ? `/dictionary/entry/${word.dictionaryEntryId}` : `/words/${word.id}`);
+        }}
         onFavorite={(word) => toggleFavorite(word.id)}
         onAction={setPendingRemove}
         actionLabel="移出"

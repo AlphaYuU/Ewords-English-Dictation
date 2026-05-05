@@ -12,27 +12,17 @@ import type {
   HistoryItem,
   OrderMode,
   PlaybackSettings,
+  PracticeSessionSettings,
   PracticeSetup,
   SearchHistoryItem,
   VocabularyLibrary,
   VocabularyUnit,
   VocabularyWord,
 } from "@dictation/domain";
-import { defaultGradingRules, defaultPlaybackSettings } from "@dictation/domain";
+import { defaultGradingRules, defaultPlaybackSettings, defaultSettings } from "@dictation/domain";
 import { gradeAnswer } from "@dictation/dictation-engine";
 import { summarizeResults } from "@dictation/domain";
 import type { ImportPreviewRow } from "@dictation/import-export";
-import {
-  seedDictionary,
-  seedExamples,
-  seedHistory,
-  seedLibraries,
-  seedResults,
-  seedSessions,
-  seedSettings,
-  seedUnits,
-  seedWords,
-} from "../services/seed-data";
 import type { AppBootstrap } from "../services/desktop-bridge";
 import { loadDesktopBootstrap, runDesktopDatabaseMutation } from "../services/desktop-bridge";
 import { normalizeLibrariesForDisplay } from "../services/library-display";
@@ -56,6 +46,15 @@ type DialogName =
   | "delete-history"
   | null;
 
+type LibraryListUiState = {
+  scrollTop?: number;
+  activeWordId?: number;
+  wordFilter?: "all" | "mastered" | "wrong";
+  sortField?: "word" | "added" | "mastery" | "wrong";
+  sortOrder?: "asc" | "desc";
+  appliedSearch?: string;
+};
+
 type AppState = {
   libraries: VocabularyLibrary[];
   units: VocabularyUnit[];
@@ -67,7 +66,7 @@ type AppState = {
   history: HistoryItem[];
   searchHistory: SearchHistoryItem[];
   settings: AppSettings;
-  dataSource: "seed" | "database";
+  dataSource: "empty" | "database";
   hydrationStatus: "idle" | "loading" | "ready" | "error";
   hydrationError?: string;
   dialog: DialogName;
@@ -78,6 +77,7 @@ type AppState = {
   sessionIndex: number;
   answerInput: string;
   sessionFeedback: "idle" | "correct" | "wrong";
+  libraryListUiState: Record<string, LibraryListUiState>;
   openDialog: (dialog: DialogName) => void;
   closeDialog: () => void;
   hydrateFromDatabase: () => Promise<void>;
@@ -88,7 +88,8 @@ type AppState = {
   setSelectedLibraryId: (libraryId: number | null) => void;
   setPendingAddWordId: (wordId: number | null) => void;
   setPendingAddDictionaryEntry: (entry: DictionaryEntry | null) => void;
-  importWords: (rows: ImportPreviewRow[], targetLibraryId?: number, options?: { silent?: boolean }) => void;
+  setLibraryListUiState: (key: string, patch: Partial<LibraryListUiState>) => void;
+  importWords: (rows: ImportPreviewRow[], targetLibraryId?: number, options?: { silent?: boolean }) => Promise<boolean>;
   restoreBackup: (backup: AppBackup) => void;
   clearAllData: () => void;
   queueDictionaryEntryForDictation: (entry: DictionaryEntry) => number;
@@ -102,6 +103,7 @@ type AppState = {
   setPracticeAccent: (accent: Accent) => void;
   setPracticeOrderMode: (orderMode: OrderMode) => void;
   setPracticeSampleCount: (sampleCount: number) => void;
+  materializePracticeSample: () => VocabularyWord[];
   updatePlaybackSettings: (settings: Partial<PlaybackSettings>) => void;
   updateGradingRules: (rules: Partial<GradingRules>) => void;
   setShowChineseHint: (showChineseHint: boolean) => void;
@@ -114,7 +116,7 @@ type AppState = {
   finishTypingSession: (sessionId: number, answerOverride?: string) => void;
   markResult: (sessionId: number, resultId: number, result: DictationResultStatus) => void;
   markAllResults: (sessionId: number, result: DictationResultStatus) => void;
-  previousWord: () => void;
+  previousWord: (sessionId?: number) => void;
   nextWord: (sessionId: number) => boolean;
   pauseSession: (sessionId: number) => void;
   resumeSession: (sessionId: number) => void;
@@ -132,7 +134,7 @@ type CreateLibraryInput = {
 };
 
 type AppBackup = Partial<Pick<AppState, "libraries" | "units" | "words" | "sessions" | "results" | "history" | "searchHistory" | "settings">>;
-type PersistedPracticeSetup = Omit<PracticeSetup, "source">;
+type PersistedPracticeSetup = Omit<PracticeSetup, "source" | "sampleWordIds">;
 
 const PRACTICE_SETTINGS_STORAGE_KEY = "dictation.practice-settings.v1";
 
@@ -162,6 +164,7 @@ function loadPracticeSetup(): PracticeSetup {
       accent: persisted.accent === "us" ? "us" : "uk",
       orderMode: persisted.orderMode === "random" || persisted.orderMode === "sample" ? persisted.orderMode : "sequence",
       sampleCount: Number.isFinite(persisted.sampleCount) ? Math.max(1, Math.round(Number(persisted.sampleCount))) : defaults.sampleCount,
+      sampleWordIds: undefined,
       showChineseHint: persisted.showChineseHint === true,
       playbackSettings: {
         playCount: persisted.playbackSettings?.playCount === 1 || persisted.playbackSettings?.playCount === 3 ? persisted.playbackSettings.playCount : 2,
@@ -217,18 +220,19 @@ function resetPracticeSetupSettings(): PracticeSetup {
   return setup;
 }
 
-function seedDataState(): Partial<AppState> {
+function emptyDataState(): Partial<AppState> {
   return {
-    libraries: normalizeLibrariesForDisplay(seedLibraries),
-    units: seedUnits,
-    words: seedWords,
-    dictionary: seedDictionary,
-    examples: seedExamples,
-    sessions: seedSessions,
-    results: seedResults,
-    history: seedHistory,
+    libraries: [],
+    units: [],
+    words: [],
+    dictionary: [],
+    examples: [],
+    sessions: [],
+    results: [],
+    history: [],
     searchHistory: [],
-    settings: seedSettings,
+    settings: defaultSettings,
+    libraryListUiState: {},
   };
 }
 
@@ -257,6 +261,13 @@ function bootstrapState(bootstrap: AppBootstrap): Partial<AppState> {
   };
 }
 
+function initialSessionIndex(sessions: DictationSession[]): number {
+  const resumable = sessions
+    .filter((session) => session.status === "active" || session.status === "paused")
+    .sort((left, right) => (right.pausedAt ?? right.createdAt) - (left.pausedAt ?? left.createdAt))[0];
+  return Math.max(0, resumable?.currentIndex ?? 0);
+}
+
 function mergeTransientDictionaryWords(nextState: Partial<AppState>, currentWords: VocabularyWord[]): Partial<AppState> {
   const transientWords = currentWords.filter((word) => word.transientSource === "dictionary");
   if (!transientWords.length || !nextState.words) return nextState;
@@ -278,6 +289,20 @@ function persistDatabaseMutation(set: SetAppState, get: GetAppState, request: { 
     });
 }
 
+async function persistDatabaseMutationAsync(set: SetAppState, get: GetAppState, request: { resource: string; [key: string]: unknown }): Promise<boolean> {
+  try {
+    const bootstrap = await runDesktopDatabaseMutation(request);
+    if (bootstrap) {
+      const nextState = request.resource === "clear-data" ? bootstrapState(bootstrap) : mergeTransientDictionaryWords(bootstrapState(bootstrap), get().words);
+      set({ ...nextState, dataSource: "database", hydrationStatus: "ready", hydrationError: undefined });
+    }
+    return true;
+  } catch (error) {
+    set({ hydrationStatus: "error", hydrationError: error instanceof Error ? error.message : String(error), dialog: "import-failed" });
+    return false;
+  }
+}
+
 function persistDatabaseMutationSilently(set: SetAppState, request: { resource: string; [key: string]: unknown }): void {
   void runDesktopDatabaseMutation(request).catch((error) => {
     set({ hydrationStatus: "error", hydrationError: error instanceof Error ? error.message : String(error) });
@@ -296,6 +321,33 @@ function persistSessionSnapshot(set: SetAppState, get: GetAppState, sessionId: n
     results: state.results.filter((row) => row.sessionId === sessionId),
     words: changedWordIdSet.size ? state.words.filter((word) => changedWordIdSet.has(word.id)) : [],
   });
+}
+
+function sessionSettingsFromSetup(setup: PracticeSetup): PracticeSessionSettings {
+  return {
+    mode: setup.mode,
+    accent: setup.accent,
+    orderMode: setup.orderMode,
+    sampleCount: setup.sampleCount,
+    sampleWordIds: setup.sampleWordIds,
+    showChineseHint: setup.showChineseHint,
+    playbackSettings: setup.playbackSettings,
+    gradingRules: setup.gradingRules,
+  };
+}
+
+function gradingRulesForSession(state: AppState, sessionId: number): GradingRules {
+  return state.sessions.find((session) => session.id === sessionId)?.settings?.gradingRules ?? state.setup.gradingRules;
+}
+
+function setSessionIndexState(state: AppState, sessionId: number | undefined, nextIndex: number): Partial<AppState> {
+  if (sessionId == null) return { sessionIndex: nextIndex, answerInput: "", sessionFeedback: "idle" };
+  return {
+    sessionIndex: nextIndex,
+    answerInput: "",
+    sessionFeedback: "idle",
+    sessions: state.sessions.map((session) => (session.id === sessionId ? { ...session, currentIndex: nextIndex } : session)),
+  };
 }
 
 function completedSessionWordIds(state: AppState, sessionId: number): number[] {
@@ -333,7 +385,25 @@ function serializePracticeQueue(source: PracticeSetup["source"], words: Vocabula
 
 function setupWithPracticeQueue(setup: PracticeSetup, bootstrap: AppBootstrap): PracticeSetup {
   const wordIds = bootstrap.practiceQueueWordIds ?? [];
-  return wordIds.length ? { ...setup, source: { sourceType: "words", wordIds } } : setup;
+  return wordIds.length ? { ...setup, source: { sourceType: "words", wordIds }, sampleWordIds: undefined } : setup;
+}
+
+function clearPracticeSample(setup: PracticeSetup): PracticeSetup {
+  return setup.sampleWordIds?.length ? { ...setup, sampleWordIds: undefined } : setup;
+}
+
+function materializeSampleForSetup(setup: PracticeSetup, words: VocabularyWord[], results: DictationResult[]): { setup: PracticeSetup; selectedWords: VocabularyWord[] } {
+  if (setup.orderMode !== "sample") {
+    return { setup: clearPracticeSample(setup), selectedWords: resolveSetupWords({ ...setup, sampleWordIds: undefined }, words, results) };
+  }
+  const sourceWords = resolveSetupWords({ ...setup, orderMode: "sequence", sampleWordIds: undefined }, words, results);
+  if (!sourceWords.length) return { setup: { ...setup, sampleWordIds: [] }, selectedWords: [] };
+  const byId = new Map(sourceWords.map((word) => [word.id, word]));
+  const cachedWords = setup.sampleWordIds?.map((wordId) => byId.get(wordId)).filter((word): word is VocabularyWord => Boolean(word)) ?? [];
+  const sampleCount = clampPracticeSampleCount(setup, words, results, setup.sampleCount ?? sourceWords.length);
+  if (cachedWords.length === sampleCount) return { setup, selectedWords: cachedWords };
+  const selectedWords = shuffleWords(sourceWords).slice(0, sampleCount);
+  return { setup: { ...setup, sampleWordIds: selectedWords.map((word) => word.id) }, selectedWords };
 }
 
 function toggleFavoriteForTarget(set: SetAppState, get: GetAppState, target: VocabularyWord): void {
@@ -383,17 +453,17 @@ function toggleWrongBookForTarget(set: SetAppState, get: GetAppState, target: Vo
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  libraries: normalizeLibrariesForDisplay(seedLibraries),
-  units: seedUnits,
-  words: seedWords,
-  dictionary: seedDictionary,
-  examples: seedExamples,
-  sessions: seedSessions,
-  results: seedResults,
-  history: seedHistory,
+  libraries: [],
+  units: [],
+  words: [],
+  dictionary: [],
+  examples: [],
+  sessions: [],
+  results: [],
+  history: [],
   searchHistory: [],
-  settings: seedSettings,
-  dataSource: "seed",
+  settings: defaultSettings,
+  dataSource: "empty",
   hydrationStatus: "idle",
   dialog: null,
   selectedLibraryId: null,
@@ -403,6 +473,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   sessionIndex: 0,
   answerInput: "",
   sessionFeedback: "idle",
+  libraryListUiState: {},
   openDialog: (dialog) => set({ dialog }),
   closeDialog: () => set({ dialog: null, pendingAddWordId: null, pendingAddDictionaryEntry: null }),
   hydrateFromDatabase: async () => {
@@ -411,12 +482,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const bootstrap = await loadDesktopBootstrap();
       if (!bootstrap) {
-        set({ hydrationStatus: "ready", dataSource: "seed" });
+        set({ ...emptyDataState(), hydrationStatus: "ready", dataSource: "empty" });
         return;
       }
       set({
         ...bootstrapState(bootstrap),
         setup: setupWithPracticeQueue(get().setup, bootstrap),
+        sessionIndex: initialSessionIndex(bootstrap.sessions),
         dataSource: "database",
         hydrationStatus: "ready",
       });
@@ -501,16 +573,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSelectedLibraryId: (selectedLibraryId) => set({ selectedLibraryId }),
   setPendingAddWordId: (pendingAddWordId) => set({ pendingAddWordId }),
   setPendingAddDictionaryEntry: (pendingAddDictionaryEntry) => set({ pendingAddDictionaryEntry }),
-  importWords: (rows, targetLibraryId, options) => {
+  setLibraryListUiState: (key, patch) =>
+    set((state) => ({
+      libraryListUiState: {
+        ...state.libraryListUiState,
+        [key]: {
+          ...state.libraryListUiState[key],
+          ...patch,
+        },
+      },
+    })),
+  importWords: async (rows, targetLibraryId, options) => {
     const importableRows = rows.filter((row) => row.word && row.action === "add" && row.status !== "error");
     if (!importableRows.length) {
       set({ dialog: "import-failed" });
-      return;
+      return false;
     }
     if (get().dataSource === "database") {
-      if (!options?.silent) set({ dialog: "import-success" });
-      persistDatabaseMutation(set, get, { resource: "import-words", rows: importableRows, targetLibraryId });
-      return;
+      const ok = await persistDatabaseMutationAsync(set, get, { resource: "import-words", rows: importableRows, targetLibraryId });
+      if (ok && !options?.silent) set({ dialog: "import-success" });
+      return ok;
     }
     set((state) => {
       const existingLibrary = targetLibraryId ? state.libraries.find((library) => library.id === targetLibraryId) : state.libraries.find((library) => library.type === "custom");
@@ -567,6 +649,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         words: [...state.words, ...importedWords],
       };
     });
+    return true;
   },
   restoreBackup: (backup) => {
     set({
@@ -593,6 +676,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessionIndex: 0,
       answerInput: "",
       sessionFeedback: "idle",
+      libraryListUiState: {},
     });
     if (get().dataSource === "database") {
       set({ hydrationStatus: "loading", hydrationError: undefined });
@@ -600,8 +684,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
     set({
-      ...seedDataState(),
-      dataSource: "seed",
+      ...emptyDataState(),
+      dataSource: "empty",
       hydrationStatus: "ready",
       hydrationError: undefined,
     });
@@ -618,6 +702,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       setup: {
         ...current.setup,
         source: nextSource,
+        sampleWordIds: undefined,
       },
     }));
     persistPracticeQueue(set, get, nextSource, nextWords);
@@ -648,7 +733,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPracticeSource: (source) => {
     set((state) => {
       const sourceCount = sourceWordCountForSetup({ ...state.setup, source }, state.words, state.results);
-      const setup = { ...state.setup, source, sampleCount: sourceCount > 0 ? sourceCount : state.setup.sampleCount };
+      const setup = { ...state.setup, source, sampleCount: sourceCount > 0 ? sourceCount : state.setup.sampleCount, sampleWordIds: undefined };
       persistPracticeSetupSettings(setup);
       return { setup };
     });
@@ -668,28 +753,54 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
   setPracticeOrderMode: (orderMode) =>
     set((state) => {
-      const setup = { ...state.setup, orderMode };
+      const setup = { ...state.setup, orderMode, sampleWordIds: undefined };
       persistPracticeSetupSettings(setup);
       return { setup };
     }),
   setPracticeSampleCount: (sampleCount) =>
     set((state) => {
-      const setup = { ...state.setup, sampleCount: clampPracticeSampleCount(state.setup, state.words, state.results, sampleCount) };
+      const setup = { ...state.setup, sampleCount: clampPracticeSampleCount(state.setup, state.words, state.results, sampleCount), sampleWordIds: undefined };
       persistPracticeSetupSettings(setup);
       return { setup };
     }),
-  updatePlaybackSettings: (settings) =>
+  materializePracticeSample: () => {
+    const state = get();
+    const materialized = materializeSampleForSetup(state.setup, state.words, state.results);
+    if (materialized.setup !== state.setup) set({ setup: materialized.setup });
+    return materialized.selectedWords;
+  },
+  updatePlaybackSettings: (settings) => {
     set((state) => {
-      const setup = { ...state.setup, playbackSettings: { ...state.setup.playbackSettings, ...settings } };
+      const playbackSettings = { ...state.setup.playbackSettings, ...settings };
+      const setup = { ...state.setup, playbackSettings };
       persistPracticeSetupSettings(setup);
-      return { setup };
-    }),
-  updateGradingRules: (rules) =>
+      return {
+        setup,
+        sessions: state.sessions.map((session) =>
+          session.status === "active" || session.status === "paused"
+            ? { ...session, settings: { ...(session.settings ?? sessionSettingsFromSetup(state.setup)), playbackSettings } }
+            : session,
+        ),
+      };
+    });
+    for (const session of get().sessions.filter((item) => item.status === "active" || item.status === "paused")) persistSessionSnapshot(set, get, session.id, []);
+  },
+  updateGradingRules: (rules) => {
     set((state) => {
-      const setup = { ...state.setup, gradingRules: { ...state.setup.gradingRules, ...rules } };
+      const gradingRules = { ...state.setup.gradingRules, ...rules };
+      const setup = { ...state.setup, gradingRules };
       persistPracticeSetupSettings(setup);
-      return { setup };
-    }),
+      return {
+        setup,
+        sessions: state.sessions.map((session) =>
+          session.status === "active" || session.status === "paused"
+            ? { ...session, settings: { ...(session.settings ?? sessionSettingsFromSetup(state.setup)), gradingRules } }
+            : session,
+        ),
+      };
+    });
+    for (const session of get().sessions.filter((item) => item.status === "active" || item.status === "paused")) persistSessionSnapshot(set, get, session.id, []);
+  },
   setShowChineseHint: (showChineseHint) =>
     set((state) => {
       const setup = { ...state.setup, showChineseHint };
@@ -728,23 +839,28 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   createSession: () => {
     const state = get();
-    const sourceWords = resolveSetupWords(state.setup, state.words, state.results);
+    const sourceWords = resolveSetupWords({ ...state.setup, orderMode: "sequence" }, state.words, state.results);
     if (!sourceWords.length || state.setup.source.sourceType === "none") return null;
+    const materialized = materializeSampleForSetup(state.setup, state.words, state.results);
+    const setupForSession = materialized.setup;
+    const orderedWords =
+      setupForSession.orderMode === "sample" ? materialized.selectedWords : setupForSession.orderMode === "random" ? shuffleWords(sourceWords) : sourceWords;
     const resultSessionIds = state.results.map((result) => Math.floor(result.id / 100));
     const id = Math.max(...state.sessions.map((session) => session.id), ...resultSessionIds, 5000) + 1;
-    const sourceName = resolveSourceName(state.setup, state.libraries, state.words);
+    const sourceName = resolveSourceName(setupForSession, state.libraries, state.words);
     const session: DictationSession = {
       id,
-      source: state.setup.source,
+      source: setupForSession.source,
       sourceName,
-      mode: state.setup.mode,
-      accent: state.setup.accent,
+      mode: setupForSession.mode,
+      accent: setupForSession.accent,
       status: "active",
-      wordCount: sourceWords.length,
+      wordCount: orderedWords.length,
+      currentIndex: 0,
+      settings: sessionSettingsFromSetup(setupForSession),
       durationSec: 0,
       createdAt: Date.now(),
     };
-    const orderedWords = state.setup.orderMode === "random" ? shuffleWords(sourceWords) : sourceWords;
     const results: DictationResult[] = orderedWords.map((word, index) => ({
       id: id * 100 + index,
       sessionId: id,
@@ -753,12 +869,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       word: word.word,
       meaning: word.meaning,
       correctAnswer: word.word,
-      result: state.setup.mode === "paper" ? "unmarked" : "unmarked",
+      result: setupForSession.mode === "paper" ? "unmarked" : "unmarked",
       hintUsed: false,
       isFavorited: word.isFavorite,
       isAddedToWrongBook: Boolean(word.inWrongBook),
     }));
-    const clearedSetup = { ...state.setup, source: { sourceType: "none" } as const };
+    const clearedSetup = { ...setupForSession, source: { sourceType: "none" } as const, sampleWordIds: undefined };
     set({ sessions: [...state.sessions, session], results: [...state.results, ...results], setup: clearedSetup, sessionIndex: 0, answerInput: "", sessionFeedback: "idle" });
     persistPracticeSetupSettings(clearedSetup);
     persistSessionSnapshot(set, get, id, []);
@@ -781,7 +897,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!current) return null;
     const answer = answerOverride ?? state.answerInput;
     if (!answer.trim() && !options?.allowEmpty) return null;
-    const grade = options?.forceWrong || !answer.trim() ? { result: "wrong" as const } : gradeAnswer(answer, current.correctAnswer, state.setup.gradingRules);
+    const grade = options?.forceWrong || !answer.trim() ? { result: "wrong" as const } : gradeAnswer(answer, current.correctAnswer, gradingRulesForSession(state, sessionId));
     const dictatedAt = Date.now();
     const transition = updateWordsForResultTransition(state.words, current.wordId, current.result, grade.result, dictatedAt);
     const updatedWord = transition.target;
@@ -831,7 +947,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (row.id === current?.id) {
           const answer = answerOverride ?? state.answerInput;
           nextUserAnswer = answer;
-          nextResult = row.answerRevealed ? "wrong" : answer.trim() ? gradeAnswer(answer, row.correctAnswer, state.setup.gradingRules).result : "wrong";
+          nextResult = row.answerRevealed ? "wrong" : answer.trim() ? gradeAnswer(answer, row.correctAnswer, gradingRulesForSession(state, sessionId)).result : "wrong";
         } else if (row.result !== "correct" && row.result !== "wrong") {
           nextResult = "wrong";
         }
@@ -860,7 +976,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       return {
         results: resultRows,
         words: finalizedWords,
-        sessions: state.sessions.map((item) => (item.id === sessionId ? { ...item, status: "completed", durationSec, completedAt, pausedAt: undefined } : item)),
+        sessions: state.sessions.map((item) =>
+          item.id === sessionId ? { ...item, status: "completed", currentIndex: Math.max(0, sessionResults.length - 1), durationSec, completedAt, pausedAt: undefined } : item,
+        ),
         history: [historyItem, ...state.history.filter((item) => item.sessionId !== sessionId)],
         answerInput: "",
         sessionFeedback: "idle",
@@ -902,10 +1020,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     persistSessionSnapshot(set, get, sessionId, allSessionWordIds(get(), sessionId));
   },
-  previousWord: () => {
+  previousWord: (sessionId) => {
     const state = get();
     if (state.sessionIndex <= 0) return;
-    set({ sessionIndex: state.sessionIndex - 1, answerInput: "", sessionFeedback: "idle" });
+    set(setSessionIndexState(state, sessionId, state.sessionIndex - 1));
+    if (sessionId != null) persistSessionSnapshot(set, get, sessionId, []);
   },
   nextWord: (sessionId) => {
     const state = get();
@@ -915,12 +1034,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (session?.mode !== "paper") get().completeSession(sessionId);
       return true;
     }
-    set({ sessionIndex: state.sessionIndex + 1, answerInput: "", sessionFeedback: "idle" });
+    set(setSessionIndexState(state, sessionId, state.sessionIndex + 1));
+    persistSessionSnapshot(set, get, sessionId, []);
     return false;
   },
   pauseSession: (sessionId) => {
     set((state) => ({
-      sessions: state.sessions.map((session) => (session.id === sessionId ? { ...session, status: "paused", pausedAt: session.pausedAt ?? Date.now() } : session)),
+      sessions: state.sessions.map((session) =>
+        session.id === sessionId ? { ...session, status: "paused", currentIndex: state.sessionIndex, pausedAt: session.pausedAt ?? Date.now() } : session,
+      ),
     }));
     persistSessionSnapshot(set, get, sessionId, []);
   },
@@ -932,6 +1054,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? {
               ...session,
               status: "active",
+              currentIndex: state.sessionIndex,
               pausedDurationSec: (session.pausedDurationSec ?? 0) + (session.pausedAt ? Math.max(0, Math.round((resumedAt - session.pausedAt) / 1000)) : 0),
               pausedAt: undefined,
             }
@@ -974,7 +1097,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       return {
         results: finalizedResults,
         words: finalizedWords,
-        sessions: state.sessions.map((item) => (item.id === sessionId ? { ...item, status: "completed", durationSec, completedAt, pausedAt: undefined } : item)),
+        sessions: state.sessions.map((item) =>
+          item.id === sessionId ? { ...item, status: "completed", currentIndex: Math.max(0, sessionResults.length - 1), durationSec, completedAt, pausedAt: undefined } : item,
+        ),
         history: [historyItem, ...state.history.filter((item) => item.sessionId !== sessionId)],
       };
     });
@@ -1000,7 +1125,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
 export function resolveSetupWords(setup: PracticeSetup, words: VocabularyWord[], results: DictationResult[] = []): VocabularyWord[] {
   const source = setup.source;
-  const select = (items: VocabularyWord[]) => (setup.orderMode === "sample" ? items.slice(0, setup.sampleCount ?? items.length) : items);
+  const select = (items: VocabularyWord[]) => {
+    if (setup.orderMode !== "sample") return items;
+    if (setup.sampleWordIds?.length) {
+      const byId = new Map(items.map((word) => [word.id, word]));
+      return setup.sampleWordIds.map((wordId) => byId.get(wordId)).filter((word): word is VocabularyWord => Boolean(word));
+    }
+    return items.slice(0, setup.sampleCount ?? items.length);
+  };
   switch (source.sourceType) {
     case "library":
       return select(words.filter((word) => word.libraryId === source.sourceId));

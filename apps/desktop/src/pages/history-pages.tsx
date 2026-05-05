@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import type { DictationResult, HistoryItem } from "@dictation/domain";
 import { Button, Chip, DictationResultSummary, EmptyState, HistoryTable, Icon, NoticeDialog, SearchBar } from "@dictation/ui";
 import { summarizeResults } from "@dictation/domain";
-import { exportHistoryCsv } from "@dictation/import-export";
+import { exportHistoryListCsv } from "@dictation/import-export";
 import { useHistoryStore } from "../stores/history-store";
 import { saveTextFile } from "../services/desktop-bridge";
 
@@ -45,7 +45,7 @@ export function HistoryPage() {
     <div className="history-page">
       <header className="page-topbar" style={{ marginBottom: 18 }}>
         <div><h1 className="page-title">听写历史</h1></div>
-        <Button variant="ghost" size="sm" iconStart={<Icon name="download" />} onClick={() => void saveTextFile("dictation-history.csv", exportHistoryCsv(results))}>导出</Button>
+        <Button variant="ghost" size="sm" iconStart={<Icon name="download" />} onClick={() => void saveTextFile("dictation-history.csv", exportHistoryListCsv(history))}>导出</Button>
       </header>
       <section className="history-stats-grid">
         <StatCard title="连续天数" value={`${streakDays}`} note="天 · 来自最近记录" accent />
@@ -345,7 +345,6 @@ export function HistoryDetailPage() {
         <div className="page-actions">
           <Button variant="primary" size="sm" onClick={() => { setPracticeSource({ sourceType: "history_session", sourceId: Number(sessionId) }); navigate(`/practice/setup?source_type=history_session&source_id=${sessionId}`); }}>重听本组</Button>
           <Button variant="secondary" size="sm" onClick={() => { setPracticeSource({ sourceType: "history_session", sourceId: Number(sessionId), filter: "wrong" }); navigate(`/practice/setup?source_type=history_session&source_id=${sessionId}&filter=wrong`); }}>重听错词</Button>
-          <Button variant="ghost" size="sm" iconStart={<Icon name="download" />} onClick={() => void saveTextFile(`dictation-history-${sessionId}.csv`, exportHistoryCsv(results))}>导出历史</Button>
         </div>
         <Button variant="danger" size="sm" iconStart={<Icon name="trash" />} onClick={() => setConfirmDeleteOpen(true)}>删除历史</Button>
       </div>

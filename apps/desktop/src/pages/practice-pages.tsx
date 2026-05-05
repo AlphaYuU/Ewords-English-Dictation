@@ -44,6 +44,7 @@ export function PracticeSetupPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [pendingSourceRemoval, setPendingSourceRemoval] = useState<SourceChipItem | null>(null);
+  const [sampleCountDraft, setSampleCountDraft] = useState<string | null>(null);
   const sourceChipViewportRef = useRef<HTMLDivElement>(null);
   const sourceChipDragRef = useRef<SourceChipDragState | null>(null);
   const [searchParams] = useSearchParams();
@@ -60,6 +61,7 @@ export function PracticeSetupPage() {
   const updatePlaybackSettings = usePracticeStore((state) => state.updatePlaybackSettings);
   const updateGradingRules = usePracticeStore((state) => state.updateGradingRules);
   const setShowChineseHint = usePracticeStore((state) => state.setShowChineseHint);
+  const materializePracticeSample = usePracticeStore((state) => state.materializePracticeSample);
   const createSession = usePracticeStore((state) => state.createSession);
   useEffect(() => {
     const nextSource = parsePracticeSource(searchParams, location.pathname === "/practice" && setup.source.sourceType === "none");
@@ -120,8 +122,19 @@ export function PracticeSetupPage() {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
   const activateSampleMode = (nextCount = sampleCount) => {
+    setSampleCountDraft(null);
     setPracticeOrderMode("sample");
     if (sampleMax > 0) setPracticeSampleCount(Math.max(1, Math.min(sampleMax, Math.round(nextCount))));
+  };
+  const commitSampleCountDraft = () => {
+    if (sampleCountDraft == null) return;
+    setPracticeOrderMode("sample");
+    const trimmed = sampleCountDraft.trim();
+    const nextCount = trimmed ? Number(trimmed) : sampleMax;
+    if (sampleMax > 0 && Number.isFinite(nextCount)) {
+      setPracticeSampleCount(Math.max(1, Math.min(sampleMax, Math.round(nextCount))));
+    }
+    setSampleCountDraft(null);
   };
   return (
     <>
@@ -225,11 +238,22 @@ export function PracticeSetupPage() {
                     type="number"
                     min={1}
                     max={sampleMax || 1}
-                    value={sampleCount}
+                    value={sampleCountDraft ?? String(sampleCount)}
                     onFocus={() => setPracticeOrderMode("sample")}
+                    onBlur={commitSampleCountDraft}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        commitSampleCountDraft();
+                        event.currentTarget.blur();
+                      }
+                    }}
                     onChange={(event) => {
-                      const next = Number(event.target.value);
-                      if (Number.isFinite(next)) activateSampleMode(next);
+                      const rawValue = event.target.value;
+                      setSampleCountDraft(rawValue);
+                      setPracticeOrderMode("sample");
+                      if (!rawValue.trim()) return;
+                      const next = Number(rawValue);
+                      if (Number.isFinite(next) && sampleMax > 0) setPracticeSampleCount(Math.max(1, Math.min(sampleMax, Math.round(next))));
                     }}
                     aria-label="抽取词数"
                   />
@@ -306,13 +330,26 @@ export function PracticeSetupPage() {
         <SummaryTile label="预计用时" value={estimateDurationLabel(selectedWords.length, resolvedSetup.playbackSettings.playCount, resolvedSetup.playbackSettings.intervalSec)} />
         <SummaryTile label="模式" value={resolvedSetup.mode === "typing" ? "打字" : "纸笔"} />
         <SummaryTile label="发音" value={resolvedSetup.accent === "us" ? "美音" : "英音"} accent />
-        <Button variant="secondary" size="lg" iconStart={<Icon name="list" />} onClick={() => navigate("/practice/list")}>查看听写列表</Button>
+        <Button
+          variant="secondary"
+          size="lg"
+          iconStart={<Icon name="list" />}
+          onClick={() => {
+            commitSampleCountDraft();
+            materializePracticeSample();
+            navigate("/practice/list");
+          }}
+        >
+          查看听写列表
+        </Button>
         <Button
           variant="primary"
           size="lg"
           disabled={!canStart}
           iconStart={<Icon name="headphones" />}
           onClick={() => {
+            commitSampleCountDraft();
+            materializePracticeSample();
             const id = createSession();
             if (!id) navigate("/practice");
             else navigate(`/practice/session/${id}?mode=${resolvedSetup.mode}`);
@@ -988,6 +1025,7 @@ export function DictationSessionTypingPage() {
   const [hintVisibility, setHintVisibility] = useState<Record<number, boolean>>({});
   const session = useMemo(() => sessions.find((item) => item.id === Number(sessionId)), [sessionId, sessions]);
   const sessionAccent = session?.accent ?? setup.accent;
+  const sessionSettings = session?.settings ?? setup;
   const results = useMemo(
     () => allResults.filter((row) => row.sessionId === Number(sessionId)).sort((a, b) => a.orderIndex - b.orderIndex),
     [allResults, sessionId],
@@ -1005,17 +1043,14 @@ export function DictationSessionTypingPage() {
   const submitCurrentAndMaybeAdvance = () => {
     if (!current) return;
     const isLast = sessionIndex >= results.length - 1;
-    if (!answerInput.trim()) {
-      setConfirmFinishOpen(true);
-      return;
-    }
+    if (!answerInput.trim()) return;
     const result = submitCurrentAnswer(Number(sessionId));
     if (isLast) {
       finishTypingSession(Number(sessionId), answerInput);
       navigate(`/practice/result/${sessionId}?mode=typing`);
       return;
     }
-    if (result === "correct") goToNextOrResult();
+    if (result === "correct" || result === "wrong") goToNextOrResult();
   };
   const finishNow = () => {
     finishTypingSession(Number(sessionId), answerInput);
@@ -1025,16 +1060,16 @@ export function DictationSessionTypingPage() {
   const playback = useDictationPlayback({
     current,
     accent: sessionAccent,
-    settings: setup.playbackSettings,
+    settings: sessionSettings.playbackSettings,
     onAutoAdvance: () => {
       submitCurrentAnswer(Number(sessionId), answerInput, { allowEmpty: true });
       goToNextOrResult();
     },
   });
-  useDictationAudioPrefetch({ results, sessionIndex, accent: sessionAccent, speed: setup.playbackSettings.speed });
+  useDictationAudioPrefetch({ results, sessionIndex, accent: sessionAccent, speed: sessionSettings.playbackSettings.speed });
   if (!current) return <PracticeEmptyPage />;
   const showAnswer = answerReveal.resultId === current.id && answerReveal.visible;
-  const showHint = Boolean(setup.showChineseHint && hintVisibility[current.id]);
+  const showHint = Boolean(sessionSettings.showChineseHint && hintVisibility[current.id]);
   return (
     <>
       <header className="page-topbar session-topbar">
@@ -1045,7 +1080,7 @@ export function DictationSessionTypingPage() {
       <ProgressBar value={((sessionIndex + 1) / results.length) * 100} tone="accent" />
       <div style={{ marginTop: 18 }}>
         <DictationPlayer
-          round={`ROUND ${sessionIndex + 1} OF ${results.length} · HINT ${setup.showChineseHint ? "可显示" : "隐藏"}`}
+          round={`ROUND ${sessionIndex + 1} OF ${results.length} · HINT ${sessionSettings.showChineseHint ? "可显示" : "隐藏"}`}
           hint={showHint ? current.meaning : "请在下方输入听到的单词"}
           playing={playback.isPlaying}
           disablePlay={playback.isPlaying}
@@ -1054,14 +1089,14 @@ export function DictationSessionTypingPage() {
           <button
             type="button"
             className="session-hint-chip"
-            disabled={!setup.showChineseHint}
+            disabled={!sessionSettings.showChineseHint}
             onClick={(event) => {
               event.stopPropagation();
               if (!showHint) revealCurrentHint(Number(sessionId));
               setHintVisibility((visibility) => ({ ...visibility, [current.id]: !showHint }));
             }}
           >
-            {setup.showChineseHint ? (showHint ? "隐藏中文" : "显示中文") : "中文已隐藏"}
+            {sessionSettings.showChineseHint ? (showHint ? "隐藏中文" : "显示中文") : "中文已隐藏"}
           </button>
           <div style={{ display: "flex", width: 640, height: 78, alignItems: "center", gap: 12, marginTop: 34, padding: 18, borderRadius: 16, background: "var(--surface-card)" }}>
             <span className="session-input-caret" />
@@ -1110,7 +1145,7 @@ export function DictationSessionTypingPage() {
         </div>
       </div>
       <DictationControlBar
-        onPrevious={previousWord}
+        onPrevious={() => previousWord(Number(sessionId))}
         onReplay={playback.replay}
         onNext={() => {
           const done = nextWord(Number(sessionId));
@@ -1189,8 +1224,12 @@ export function DictationSessionPaperPage() {
   const previousWord = usePracticeStore((state) => state.previousWord);
   const nextWord = usePracticeStore((state) => state.nextWord);
   const pauseSession = usePracticeStore((state) => state.pauseSession);
+  const revealCurrentHint = usePracticeStore((state) => state.revealCurrentHint);
+  const [confirmFinishOpen, setConfirmFinishOpen] = useState(false);
+  const [hintVisibility, setHintVisibility] = useState<Record<number, boolean>>({});
   const session = useMemo(() => sessions.find((item) => item.id === Number(sessionId)), [sessionId, sessions]);
   const sessionAccent = session?.accent ?? setup.accent;
+  const sessionSettings = session?.settings ?? setup;
   const results = useMemo(
     () => allResults.filter((row) => row.sessionId === Number(sessionId)).sort((a, b) => a.orderIndex - b.orderIndex),
     [allResults, sessionId],
@@ -1199,14 +1238,15 @@ export function DictationSessionPaperPage() {
   const playback = useDictationPlayback({
     current,
     accent: sessionAccent,
-    settings: setup.playbackSettings,
+    settings: sessionSettings.playbackSettings,
     onAutoAdvance: () => {
       const done = nextWord(Number(sessionId));
       if (done) navigate(`/practice/result/${sessionId}?mode=paper`);
     },
   });
-  useDictationAudioPrefetch({ results, sessionIndex, accent: sessionAccent, speed: setup.playbackSettings.speed });
+  useDictationAudioPrefetch({ results, sessionIndex, accent: sessionAccent, speed: sessionSettings.playbackSettings.speed });
   if (!current) return <PracticeEmptyPage />;
+  const showHint = Boolean(sessionSettings.showChineseHint && hintVisibility[current.id]);
   return (
     <>
       <header className="page-topbar session-topbar">
@@ -1217,15 +1257,31 @@ export function DictationSessionPaperPage() {
       <ProgressBar value={((sessionIndex + 1) / results.length) * 100} tone="accent" />
       <div style={{ marginTop: 18 }}>
         <DictationPlayer
-          round={`ROUND ${sessionIndex + 1} OF ${results.length}`}
-          hint="请在纸上写下听到的单词"
+          round={`ROUND ${sessionIndex + 1} OF ${results.length} · HINT ${sessionSettings.showChineseHint ? "可显示" : "隐藏"}`}
+          hint={showHint ? current.meaning : "请在纸上写下听到的单词"}
           playing={playback.isPlaying}
           disablePlay={playback.isPlaying}
           onPlay={playback.replay}
-        />
+        >
+          <button
+            type="button"
+            className="session-hint-chip"
+            disabled={!sessionSettings.showChineseHint}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (!showHint) revealCurrentHint(Number(sessionId));
+              setHintVisibility((visibility) => ({ ...visibility, [current.id]: !showHint }));
+            }}
+          >
+            {sessionSettings.showChineseHint ? (showHint ? "隐藏中文" : "显示中文") : "中文已隐藏"}
+          </button>
+          <p style={{ marginTop: 30, color: "var(--foreground-inverse)", opacity: 0.86 }}>
+            在纸上写下听到的单词，完成后进入批改页手动标记结果。
+          </p>
+        </DictationPlayer>
       </div>
       <DictationControlBar
-        onPrevious={previousWord}
+        onPrevious={() => previousWord(Number(sessionId))}
         onReplay={playback.replay}
         onNext={() => {
           const done = nextWord(Number(sessionId));
@@ -1235,12 +1291,22 @@ export function DictationSessionPaperPage() {
           pauseSession(Number(sessionId));
           navigate(`/practice/session/${sessionId}?paused=1`);
         }}
-        onSubmit={() => navigate(`/practice/result/${sessionId}?mode=paper`)}
+        onSubmit={() => setConfirmFinishOpen(true)}
         disablePrevious={sessionIndex <= 0}
         disableReplay={!playback.canReplay}
         submitLabel="完成听写"
       />
-      <div style={{ marginTop: 24 }}><Button variant="danger" size="lg" onClick={() => navigate(`/practice/result/${sessionId}?mode=paper`)}>结束并批改</Button></div>
+      <NoticeDialog
+        open={confirmFinishOpen}
+        title="是否完成听写"
+        description="确认后进入纸笔批改页面。"
+        confirmText="确定"
+        onConfirm={() => {
+          setConfirmFinishOpen(false);
+          navigate(`/practice/result/${sessionId}?mode=paper`);
+        }}
+        onClose={() => setConfirmFinishOpen(false)}
+      />
     </>
   );
 }
@@ -1265,6 +1331,7 @@ export function DictationSessionSettingsPage() {
   const updateGradingRules = usePracticeStore((state) => state.updateGradingRules);
   const session = sessions.find((item) => item.id === Number(sessionId));
   const mode = session?.mode ?? setup.mode;
+  const sessionSettings = session?.settings ?? setup;
   const closeUrl = `/practice/session/${sessionId}?mode=${mode}`;
   return (
     <>
@@ -1277,18 +1344,18 @@ export function DictationSessionSettingsPage() {
             <span>播放速度</span>
             <SegmentedControl
               options={[{ label: "0.5x", value: "0.5" }, { label: "1.0x", value: "1" }, { label: "1.5x", value: "1.5" }]}
-              value={String(setup.playbackSettings.speed)}
+              value={String(sessionSettings.playbackSettings.speed)}
               onChange={(value) => updatePlaybackSettings({ speed: Number(value) as 0.5 | 1 | 1.5 })}
             />
           </div>
-          <SettingSwitch label="允许重放" checked={setup.playbackSettings.allowReplay} onChange={(checked) => updatePlaybackSettings({ allowReplay: checked })} />
-          <SettingSwitch label="自动播放下一词" checked={setup.playbackSettings.autoPlayNext} onChange={(checked) => updatePlaybackSettings({ autoPlayNext: checked })} />
+          <SettingSwitch label="允许重放" checked={sessionSettings.playbackSettings.allowReplay} onChange={(checked) => updatePlaybackSettings({ allowReplay: checked })} />
+          <SettingSwitch label="自动播放下一词" checked={sessionSettings.playbackSettings.autoPlayNext} onChange={(checked) => updatePlaybackSettings({ autoPlayNext: checked })} />
         </section>
         <section style={panelStyle}>
           <h2 style={{ marginTop: 0 }}>批改规则</h2>
-          <SettingSwitch label="忽略大小写" checked={setup.gradingRules.ignoreCase} onChange={(checked) => updateGradingRules({ ignoreCase: checked })} />
-          <SettingSwitch label="忽略首尾空格" checked={setup.gradingRules.trimWhitespace} onChange={(checked) => updateGradingRules({ trimWhitespace: checked })} />
-          <SettingSwitch label="接受英美拼写差异" checked={setup.gradingRules.acceptUkUs} onChange={(checked) => updateGradingRules({ acceptUkUs: checked })} />
+          <SettingSwitch label="忽略大小写" checked={sessionSettings.gradingRules.ignoreCase} onChange={(checked) => updateGradingRules({ ignoreCase: checked })} />
+          <SettingSwitch label="忽略首尾空格" checked={sessionSettings.gradingRules.trimWhitespace} onChange={(checked) => updateGradingRules({ trimWhitespace: checked })} />
+          <SettingSwitch label="接受英美拼写差异" checked={sessionSettings.gradingRules.acceptUkUs} onChange={(checked) => updateGradingRules({ acceptUkUs: checked })} />
         </section>
       </div>
       <div className="toolbar-row"><span /><Button variant="primary" size="lg" onClick={() => navigate(closeUrl)}>应用</Button></div>

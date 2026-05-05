@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import type { DictionaryEntry } from "@dictation/domain";
 import { Button, Dialog, Icon, Input, NoticeDialog, SearchBar, Textarea } from "@dictation/ui";
-import { buildImportPreview } from "@dictation/import-export";
+import { buildImportPreview, type ImportPreviewRow } from "@dictation/import-export";
 import { useUiStore } from "../stores/ui-store";
 import { clearDesktopCache, queryDesktopDatabase, selectDesktopImportFile } from "../services/desktop-bridge";
 
@@ -33,12 +34,30 @@ export function DialogHost() {
   const [candidateState, setCandidateState] = useState<{ query: string; entries: DictionaryEntry[] }>({ query: "", entries: [] });
   const [pendingRemoveFromAdd, setPendingRemoveFromAdd] = useState<{ wordId: number; word: string; libraryName: string } | null>(null);
   const [targetMenuOpen, setTargetMenuOpen] = useState(false);
+  const [importTargetMenuOpen, setImportTargetMenuOpen] = useState(false);
   const targetMenuRef = useRef<HTMLDivElement>(null);
+  const importTargetMenuRef = useRef<HTMLDivElement>(null);
   const [customWord, setCustomWord] = useState("");
   const [customMeaning, setCustomMeaning] = useState("");
   const [importText, setImportText] = useState("");
+  const [importFileName, setImportFileName] = useState("");
+  const [importPreviewRows, setImportPreviewRows] = useState<ImportPreviewRow[]>([]);
+  const [importFailureReason, setImportFailureReason] = useState("文件为空、格式不支持或解析错误。");
+  const [importTargetLibraryId, setImportTargetLibraryId] = useState<number | null>(null);
+  const [lastImportTargetLibraryId, setLastImportTargetLibraryId] = useState<number | null>(null);
+  const [importSubmitting, setImportSubmitting] = useState(false);
   const [cacheClearResult, setCacheClearResult] = useState<{ removedFiles: number; removedBytes: number } | null>(null);
-  const previewRows = buildImportPreview(importText, words.map((word) => word.word));
+  const importablePreviewRows = importPreviewRows.filter((row) => row.word && row.action === "add" && row.status !== "error");
+  const importTargetLibraries = libraries.filter((library) => library.type === "custom" || library.type === "official");
+  const defaultImportTargetLibraryId =
+    importTargetLibraries.find((library) => library.id === selectedLibraryId)?.id ??
+    importTargetLibraries.find((library) => library.type === "custom")?.id ??
+    importTargetLibraries[0]?.id ??
+    null;
+  const resolvedImportTargetLibraryId = importTargetLibraries.some((library) => library.id === importTargetLibraryId)
+    ? importTargetLibraryId
+    : defaultImportTargetLibraryId;
+  const importTargetLibrary = importTargetLibraries.find((library) => library.id === resolvedImportTargetLibraryId);
   useEffect(() => {
     const needsDictionarySearch = dialog === "add-word-search" || (dialog === "add-word-select-library" && pendingAddWordId == null);
     const trimmedQuery = debouncedQuery.trim();
@@ -69,6 +88,16 @@ export function DialogHost() {
     document.addEventListener("pointerdown", closeTargetMenu);
     return () => document.removeEventListener("pointerdown", closeTargetMenu);
   }, [targetMenuOpen]);
+  useEffect(() => {
+    if (!importTargetMenuOpen) return;
+    const closeImportTargetMenu = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target && importTargetMenuRef.current?.contains(target)) return;
+      setImportTargetMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeImportTargetMenu);
+    return () => document.removeEventListener("pointerdown", closeImportTargetMenu);
+  }, [importTargetMenuOpen]);
   const addTag = () => {
     const trimmed = tagDraft.trim();
     if (!trimmed || libraryTags.includes(trimmed)) return;
@@ -82,9 +111,57 @@ export function DialogHost() {
     setTagDraft("");
     setCoverColor(coverColors[1].value);
   };
+  const showImportFailure = (reason: string) => {
+    setImportFailureReason(reason);
+    openDialog("import-failed");
+  };
+  const existingWordsForImportTarget = (targetLibraryId: number | null | undefined) =>
+    targetLibraryId == null ? [] : words.filter((word) => word.libraryId === targetLibraryId).map((word) => word.word);
+  const buildTargetImportPreview = (text: string, targetLibraryId = resolvedImportTargetLibraryId) =>
+    buildImportPreview(text, existingWordsForImportTarget(targetLibraryId));
+  const prepareImportPreview = (text: string, fileName = "", targetLibraryId = resolvedImportTargetLibraryId) => {
+    const nextRows = buildTargetImportPreview(text, targetLibraryId);
+    const hasImportableRows = nextRows.some((row) => row.word && row.status !== "error" && row.action === "add");
+    flushSync(() => {
+      setImportText(text);
+      setImportFileName(fileName);
+      setImportPreviewRows(nextRows);
+      setImportFailureReason("文件为空、格式不支持或解析错误。");
+    });
+    if (!text.trim()) {
+      showImportFailure("文件为空或没有可读取的文本内容。");
+      return false;
+    }
+    if (!hasImportableRows) {
+      showImportFailure("未识别到可导入的单词。请确认第一列是单词，第二列是释义。");
+      return false;
+    }
+    return true;
+  };
   const handleSelectImportFile = async () => {
-    const selected = await selectDesktopImportFile();
-    if (selected) setImportText(selected.text);
+    try {
+      const selected = await selectDesktopImportFile();
+      if (!selected) return;
+      if (!selected.ok) {
+        showImportFailure(`文件读取失败：${selected.error}`);
+        return;
+      }
+      if (prepareImportPreview(selected.text, selected.fileName)) openDialog("import-preview");
+    } catch (error) {
+      console.error("Failed to read import file", error);
+      showImportFailure(`文件读取失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  const handleManualImportPreview = () => {
+    if (prepareImportPreview(importText)) openDialog("import-preview");
+  };
+  const handleConfirmImport = async () => {
+    if (!resolvedImportTargetLibraryId || importSubmitting) return;
+    setImportSubmitting(true);
+    setLastImportTargetLibraryId(resolvedImportTargetLibraryId);
+    const ok = await importWords(importablePreviewRows, resolvedImportTargetLibraryId);
+    setImportSubmitting(false);
+    if (!ok) showImportFailure("导入写入失败，请重试。");
   };
   const closeAddWordDialog = () => {
     setQuery("");
@@ -181,7 +258,8 @@ export function DialogHost() {
     const candidateLibraries = libraries.filter((library) => library.type === "custom" || library.type === "official");
     const addPendingWord = (libraryId: number) => {
       if (!sourceWord) return;
-      importWords(
+      setLastImportTargetLibraryId(libraryId);
+      void importWords(
         [
           {
             tempId: pendingWord ? `word_${pendingWord.id}` : `entry_${entry?.id ?? sourceWord.word}`,
@@ -404,26 +482,72 @@ export function DialogHost() {
     return (
       <Dialog
         open
-        title="导入词表"
+        title="导入单词"
         onClose={closeDialog}
         footer={
           <>
             <Button variant="secondary" size="dialog" onClick={closeDialog}>取消</Button>
-            <Button variant="primary" size="dialog" disabled={!importText.trim()} onClick={() => openDialog("import-preview")}>预览导入</Button>
+            <Button variant="primary" size="dialog" disabled={!importText.trim() || !resolvedImportTargetLibraryId} onClick={handleManualImportPreview}>预览导入</Button>
           </>
         }
       >
-        <div style={{ marginBottom: 12 }}><Button variant="secondary" size="md" onClick={handleSelectImportFile}>选择文件</Button></div>
-        <Textarea value={importText} onChange={(event) => setImportText(event.target.value)} />
-        <p className="page-subtitle">支持 CSV / TXT / XLSX。当前预览使用文本内容解析。</p>
+        <div className="import-file-toolbar">
+          <Button variant="secondary" size="md" onClick={handleSelectImportFile}>选择文件</Button>
+          <div className="library-select-wrap import-target-select" ref={importTargetMenuRef}>
+            <button
+              type="button"
+              className="library-select-button import-target-button"
+              disabled={!importTargetLibraries.length}
+              onClick={() => setImportTargetMenuOpen((open) => !open)}
+            >
+              <span>{importTargetLibrary?.name ?? "选择目标词库"}</span>
+              <Icon name="chevronDown" size={14} />
+            </button>
+            {importTargetMenuOpen ? (
+              <div className="library-select-menu import-target-menu">
+                {importTargetLibraries.map((library) => (
+                  <button
+                    type="button"
+                    key={library.id}
+                    className={library.id === resolvedImportTargetLibraryId ? "is-selected" : ""}
+                    onClick={() => {
+                      setImportTargetLibraryId(library.id);
+                      if (importText.trim()) setImportPreviewRows(buildTargetImportPreview(importText, library.id));
+                      setImportTargetMenuOpen(false);
+                    }}
+                  >
+                    <span>{library.name}</span>
+                    <small>{library.wordCount.toLocaleString()} 词</small>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <Textarea
+          value={importText}
+          onChange={(event) => {
+            setImportText(event.target.value);
+            setImportFileName("");
+            setImportPreviewRows([]);
+          }}
+          placeholder={"word,meaning\napple,苹果\nlearn 学习；认识到；得知"}
+        />
+        <p className="page-subtitle import-format-hint">
+          <span>支持 CSV / TXT / XLSX。</span>
+          <span>格式：word,meaning 或 单词,释义；也可用逗号或空格分隔。</span>
+        </p>
       </Dialog>
     );
   }
   if (dialog === "import-preview") {
     return (
-      <Dialog open title="导入预览" onClose={closeDialog} large footer={<><Button variant="secondary" size="dialog" onClick={closeDialog}>取消</Button><Button variant="primary" size="dialog" onClick={() => importWords(previewRows)}>确认导入</Button></>}>
+      <Dialog open title="导入预览" onClose={closeDialog} large footer={<><Button variant="secondary" size="dialog" onClick={closeDialog}>取消</Button><Button variant="primary" size="dialog" disabled={!importablePreviewRows.length || !resolvedImportTargetLibraryId || importSubmitting} onClick={handleConfirmImport}>{importSubmitting ? "导入中" : "确认导入"}</Button></>}>
+        <p className="dialog-subtitle">
+          导入到 {importTargetLibrary?.name ?? "目标词库"}{importFileName ? ` · ${importFileName}` : ""}
+        </p>
         <div className="word-table">
-          {previewRows.map((row) => (
+          {importPreviewRows.map((row) => (
             <div className="word-row" key={row.tempId} style={{ gridTemplateColumns: "80px 160px 1fr 120px" }}>
               <span>{row.rowIndex}</span><span>{row.word}</span><span>{row.meaning}</span><span>{row.status}</span>
             </div>
@@ -490,13 +614,13 @@ export function DialogHost() {
         onConfirm={closeDialog}
         onClose={() => {
           closeDialog();
-          navigate(selectedLibraryId ? `/library/${selectedLibraryId}` : "/library");
+          navigate(lastImportTargetLibraryId ? `/library/${lastImportTargetLibraryId}` : selectedLibraryId ? `/library/${selectedLibraryId}` : "/library");
         }}
       />
     );
   }
   if (dialog === "import-failed") {
-    return <NoticeDialog open title="导入失败" description="文件为空、格式不支持或解析错误。" danger confirmText="重试" onConfirm={closeDialog} onClose={closeDialog} />;
+    return <NoticeDialog open title="导入失败" description={importFailureReason} danger confirmText="重试" onConfirm={() => openDialog("import-file")} onClose={() => openDialog("import-file")} />;
   }
   if (dialog === "export-failed") {
     return <NoticeDialog open title="导出失败" description="未找到例句署名文件，请确认应用数据完整。" danger confirmText="确定" onConfirm={closeDialog} onClose={closeDialog} />;

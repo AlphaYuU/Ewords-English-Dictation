@@ -3,6 +3,10 @@ import path from "node:path";
 import { app, dialog, ipcMain } from "electron";
 import * as XLSX from "xlsx";
 
+type ImportFileResult =
+  | { ok: true; filePath: string; fileName: string; text: string }
+  | { ok: false; filePath?: string; fileName?: string; error: string };
+
 ipcMain.handle("file:select-import-file", async () => {
   const result = await dialog.showOpenDialog({
     properties: ["openFile"],
@@ -10,11 +14,23 @@ ipcMain.handle("file:select-import-file", async () => {
   });
   if (result.canceled) return null;
   const filePath = result.filePaths[0];
-  return {
-    filePath,
-    fileName: path.basename(filePath),
-    text: readImportFile(filePath),
-  };
+  const fileName = path.basename(filePath);
+  try {
+    return {
+      ok: true,
+      filePath,
+      fileName,
+      text: readImportFile(filePath),
+    } satisfies ImportFileResult;
+  } catch (error) {
+    console.error("Failed to read import file", { filePath, error });
+    return {
+      ok: false,
+      filePath,
+      fileName,
+      error: error instanceof Error ? error.message : String(error),
+    } satisfies ImportFileResult;
+  }
 });
 
 ipcMain.handle("file:select-data-backup-file", async () => {
@@ -71,10 +87,13 @@ ipcMain.handle("file:clear-cache", async () => {
 });
 
 function readImportFile(filePath: string): string {
-  if (filePath.toLowerCase().endsWith(".xlsx")) {
-    const workbook = XLSX.readFile(filePath);
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".xlsx") {
+    const workbook = XLSX.read(readFileSync(filePath), { type: "buffer" });
+    if (!workbook.SheetNames.length) return "";
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-    return XLSX.utils.sheet_to_csv(firstSheet);
+    if (!firstSheet) return "";
+    return XLSX.utils.sheet_to_csv(firstSheet, { blankrows: false });
   }
   return readFileSync(filePath, "utf8");
 }

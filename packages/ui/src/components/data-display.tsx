@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { DictationSummary, HistoryItem, LibraryType, VocabularyWord } from "@dictation/domain";
 import { Button } from "./primitives";
@@ -87,33 +87,48 @@ export function EmptyLibraryCard({ onClick }: { onClick?: () => void }) {
 export function WordTable({
   words,
   activeId,
+  initialScrollTop = 0,
   actionLabel = "移出",
   onWordClick,
   onFavorite,
   onAction,
+  onScrollTopChange,
   variant = "library",
   visibleRows = 10,
 }: {
   words: VocabularyWord[];
   activeId?: number;
+  initialScrollTop?: number;
   actionLabel?: string;
   onWordClick?: (word: VocabularyWord) => void;
   onFavorite?: (word: VocabularyWord) => void;
   onAction?: (word: VocabularyWord) => void;
+  onScrollTopChange?: (scrollTop: number) => void;
   variant?: "library" | "result";
   visibleRows?: number;
 }) {
   const rowHeight = 46;
   const overscan = 5;
-  const [scrollTop, setScrollTop] = useState(0);
   const shouldVirtualize = words.length > visibleRows;
+  const maxScrollTop = shouldVirtualize ? Math.max(0, words.length * rowHeight - visibleRows * rowHeight) : 0;
+  const [scrollTop, setScrollTop] = useState(() => clampScrollTop(initialScrollTop, maxScrollTop));
+  const restoredScrollRef = useRef(false);
+  const bodyRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node || restoredScrollRef.current) return;
+      node.scrollTop = clampScrollTop(initialScrollTop, maxScrollTop);
+      restoredScrollRef.current = true;
+    },
+    [initialScrollTop, maxScrollTop],
+  );
+  const clampedScrollTop = clampScrollTop(scrollTop, maxScrollTop);
   const range = useMemo(() => {
     if (!shouldVirtualize) return { start: 0, end: words.length };
     const maxStart = Math.max(0, words.length - visibleRows - overscan * 2 - 2);
-    const start = Math.min(Math.max(0, Math.floor(scrollTop / rowHeight) - overscan), maxStart);
+    const start = Math.min(Math.max(0, Math.floor(clampedScrollTop / rowHeight) - overscan), maxStart);
     const end = Math.min(words.length, start + visibleRows + overscan * 2 + 2);
     return { start, end };
-  }, [scrollTop, shouldVirtualize, visibleRows, words.length]);
+  }, [clampedScrollTop, shouldVirtualize, visibleRows, words.length]);
   const visibleWords = shouldVirtualize ? words.slice(range.start, range.end) : words;
   return (
     <div className={`word-table ${shouldVirtualize ? "has-scrollbar" : ""}`}>
@@ -127,9 +142,14 @@ export function WordTable({
         <span>{actionLabel === "移出" ? "删除" : "操作"}</span>
       </div>
       <div
+        ref={bodyRef}
         className={`word-table-body ${shouldVirtualize ? "is-virtualized" : ""}`}
         style={shouldVirtualize ? { height: rowHeight * visibleRows } : undefined}
-        onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+        onScroll={(event) => {
+          const nextScrollTop = event.currentTarget.scrollTop;
+          setScrollTop(nextScrollTop);
+          onScrollTopChange?.(nextScrollTop);
+        }}
       >
         <div className="word-table-spacer" style={shouldVirtualize ? { height: words.length * rowHeight } : undefined}>
           {visibleWords.map((word, visibleIndex) => {
@@ -189,6 +209,11 @@ export function WordTable({
   );
 }
 
+function clampScrollTop(scrollTop: number, maxScrollTop: number): number {
+  if (!Number.isFinite(scrollTop)) return 0;
+  return Math.max(0, Math.min(maxScrollTop, scrollTop));
+}
+
 export function HistoryTable({ items, onOpen, onDelete }: { items: HistoryItem[]; onOpen?: (item: HistoryItem) => void; onDelete?: (item: HistoryItem) => void }) {
   return (
     <div className="history-table">
@@ -197,7 +222,7 @@ export function HistoryTable({ items, onOpen, onDelete }: { items: HistoryItem[]
         <span>词数</span>
         <span>时长</span>
         <span>正确率</span>
-        <span>操作</span>
+        <span>删除</span>
       </div>
       <div className="history-table-body">
         {items.map((item) => (

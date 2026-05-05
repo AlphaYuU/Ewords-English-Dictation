@@ -37,7 +37,7 @@ type DictationBridge = {
     query: <T>(request: { resource: string; [key: string]: unknown }) => Promise<DatabaseResponse<T>>;
   };
   file: {
-    selectImportFile: () => Promise<{ filePath: string; fileName: string; text: string } | null>;
+    selectImportFile: () => Promise<ImportFileResult | null>;
     selectDataBackupFile: () => Promise<{ filePath: string; fileName: string; text: string } | null>;
     saveTextFile: (request: { defaultPath: string; content: string; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
     exportTatoebaAttributionCsv: () => Promise<string | null>;
@@ -51,6 +51,10 @@ type DictationBridge = {
     stop: () => Promise<boolean>;
   };
 };
+
+export type ImportFileResult =
+  | { ok: true; filePath: string; fileName: string; text: string }
+  | { ok: false; filePath?: string; fileName?: string; error: string };
 
 declare global {
   interface Window {
@@ -83,7 +87,7 @@ export async function queryDesktopDatabase<T>(request: { resource: string; [key:
   return response.data;
 }
 
-export async function selectDesktopImportFile(): Promise<{ filePath: string; fileName: string; text: string } | null> {
+export async function selectDesktopImportFile(): Promise<ImportFileResult | null> {
   if (!hasDesktopBridge()) return null;
   return window.dictationBridge!.file.selectImportFile();
 }

@@ -12,4 +12,9 @@ describe("grading rules", () => {
     expect(gradeAnswer("Ambiguous", "ambiguous").result).toBe("correct");
     expect(gradeAnswer("ambiant", "ambient").result).toBe("wrong");
   });
+
+  it("accepts common UK and US spelling variants only when enabled", () => {
+    expect(gradeAnswer("colour", "color").result).toBe("correct");
+    expect(gradeAnswer("colour", "color", { acceptUkUs: false }).result).toBe("wrong");
+  });
 });

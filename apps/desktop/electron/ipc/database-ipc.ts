@@ -131,6 +131,7 @@ function getDatabase(): DatabaseSync {
   ensurePracticeQueueTable(db);
   ensureUserWordStateTables(db);
   ensureVocabularyWordUniqueIndex(db);
+  ensureDictionarySearchIndexes(db);
   migrateLegacyWordState(db);
   ensureMinimumSeed(db);
   return db;
@@ -284,6 +285,12 @@ function ensureVocabularyWordUniqueIndex(database: DatabaseSync): void {
       GROUP BY library_id, lower(word)
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_vocabulary_words_library_word_unique ON vocabulary_words(library_id, lower(word));
+  `);
+}
+
+function ensureDictionarySearchIndexes(database: DatabaseSync): void {
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_dictionary_entries_word_nocase ON dictionary_entries(word COLLATE NOCASE);
   `);
 }
 
@@ -476,7 +483,7 @@ function importWords(database: DatabaseSync, rows: Record<string, unknown>[], ta
   const insertEntry = database.prepare(
     "INSERT OR IGNORE INTO dictionary_entries (word, part_of_speech, meaning_cn, source, created_at, updated_at) VALUES (?, ?, ?, 'custom', ?, ?)",
   );
-  const findEntry = database.prepare("SELECT id FROM dictionary_entries WHERE word = ?");
+  const findEntry = database.prepare("SELECT id FROM dictionary_entries WHERE lower(word) = lower(?) ORDER BY source = 'custom' DESC, id LIMIT 1");
   const insertWord = database.prepare(
     "INSERT OR IGNORE INTO vocabulary_words (library_id, dictionary_entry_id, word, meaning, phonetic, part_of_speech, is_favorite, mastery_level, wrong_count, dictation_count, added_at) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?)",
   );
@@ -488,7 +495,8 @@ function importWords(database: DatabaseSync, rows: Record<string, unknown>[], ta
       if (!word) continue;
       const meaning = String(row.meaning || "暂无释义");
       insertEntry.run(word, row.partOfSpeech == null ? null : String(row.partOfSpeech), meaning, now, now);
-      const entry = findEntry.get(word) as { id: number };
+      const entry = findEntry.get(word) as { id: number } | undefined;
+      if (!entry) continue;
       const phonetic = row.phonetic == null ? findDictionaryPhonetic(database, Number(entry.id)) : String(row.phonetic);
       const result = insertWord.run(libraryId, Number(entry.id), word, meaning, phonetic, row.partOfSpeech == null ? null : String(row.partOfSpeech), now + index);
       const wordId = Number(result.lastInsertRowid) || findWordId(database, libraryId, word);
@@ -640,7 +648,11 @@ function restoreData(database: DatabaseSync, backup: Record<string, unknown>): v
         Number(session.durationSec ?? 0),
         Number(session.pausedDurationSec ?? 0),
         session.pausedAt == null ? null : Number(session.pausedAt),
-        JSON.stringify({ source }),
+        JSON.stringify({
+          source,
+          currentIndex: Number(session.currentIndex ?? 0),
+          settings: toRecord(session.settings),
+        }),
         Number(session.createdAt ?? now),
         session.completedAt == null ? null : Number(session.completedAt),
       );
@@ -822,7 +834,11 @@ function saveSession(
         Number(session.durationSec ?? 0),
         Number(session.pausedDurationSec ?? 0),
         session.pausedAt == null ? null : Number(session.pausedAt),
-        JSON.stringify({ source }),
+        JSON.stringify({
+          source,
+          currentIndex: Number(session.currentIndex ?? 0),
+          settings: toRecord(session.settings),
+        }),
         Number(session.createdAt ?? Date.now()),
         session.completedAt == null ? null : Number(session.completedAt),
       );
@@ -1088,32 +1104,75 @@ function findPracticeQueueWordIds(database: DatabaseSync): number[] {
 }
 
 function searchDictionary(database: DatabaseSync, query: string, limit: number) {
-  const normalizedQuery = query.trim().toLowerCase();
+  const normalizedQuery = query.trim();
   if (!normalizedQuery) return [];
-  const containsQuery = `%${normalizedQuery}%`;
-  const prefixQuery = `${normalizedQuery}%`;
-  const rows = database
-    .prepare(
-      `SELECT e.*
-       FROM dictionary_entries e
-       JOIN (
-         SELECT min(id) as id
-         FROM dictionary_entries
-         WHERE lower(word) LIKE ? OR lower(meaning_cn) LIKE ?
-         GROUP BY lower(word)
-       ) unique_entries ON unique_entries.id = e.id
-       ORDER BY
-         CASE
-           WHEN lower(e.word) = ? THEN 0
-           WHEN lower(e.word) LIKE ? THEN 1
-           WHEN lower(e.word) LIKE ? THEN 2
-           ELSE 3
-         END,
-         length(e.word),
-         e.word
-       LIMIT ?`,
-    )
-    .all(containsQuery, containsQuery, normalizedQuery, prefixQuery, containsQuery, limit) as Record<string, unknown>[];
+  const rows: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  const appendRows = (nextRows: Record<string, unknown>[]) => {
+    for (const row of nextRows) {
+      const key = normalizeWordKey(row.word);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      rows.push(row);
+      if (rows.length >= limit) break;
+    }
+  };
+  const wordPrefix = `${normalizedQuery}%`;
+  appendRows(
+    database
+      .prepare(
+        `SELECT e.*
+         FROM dictionary_entries e
+         JOIN (
+           SELECT min(id) as id
+           FROM dictionary_entries
+           WHERE word LIKE ? COLLATE NOCASE
+           GROUP BY lower(word)
+           LIMIT ?
+         ) unique_entries ON unique_entries.id = e.id
+         ORDER BY
+           CASE WHEN e.word = ? COLLATE NOCASE THEN 0 ELSE 1 END,
+           length(e.word),
+           e.word`,
+      )
+      .all(wordPrefix, limit, normalizedQuery) as Record<string, unknown>[],
+  );
+  if (rows.length < limit && normalizedQuery.length >= 2) {
+    appendRows(
+      database
+        .prepare(
+          `SELECT e.*
+           FROM dictionary_entries e
+           JOIN (
+             SELECT min(id) as id
+             FROM dictionary_entries
+             WHERE word LIKE ? COLLATE NOCASE
+             GROUP BY lower(word)
+             LIMIT ?
+           ) unique_entries ON unique_entries.id = e.id
+           ORDER BY length(e.word), e.word`,
+        )
+        .all(`%${normalizedQuery}%`, limit - rows.length) as Record<string, unknown>[],
+    );
+  }
+  if (rows.length < limit && normalizedQuery.length >= 2) {
+    appendRows(
+      database
+        .prepare(
+          `SELECT e.*
+           FROM dictionary_entries e
+           JOIN (
+             SELECT min(id) as id
+             FROM dictionary_entries
+             WHERE meaning_cn LIKE ?
+             GROUP BY lower(word)
+             LIMIT ?
+           ) unique_entries ON unique_entries.id = e.id
+           ORDER BY length(e.word), e.word`,
+        )
+        .all(`%${normalizedQuery}%`, limit - rows.length) as Record<string, unknown>[],
+    );
+  }
   return rows.map(mapDictionaryEntry);
 }
 
@@ -1211,20 +1270,26 @@ function findDictionaryExamplesForEntry(database: DatabaseSync, entryId: number,
 
 function findSessions(database: DatabaseSync) {
   const rows = database.prepare("SELECT * FROM dictation_sessions ORDER BY created_at DESC").all() as Record<string, unknown>[];
-  return rows.map((row) => ({
-    id: Number(row.id),
-    source: mapPracticeSource(row),
-    sourceName: String(row.source_name),
-    mode: String(row.mode),
-    accent: String(row.accent),
-    status: String(row.status),
-    wordCount: Number(row.word_count),
-    durationSec: Number(row.duration_sec),
-    pausedDurationSec: Number(row.paused_duration_sec ?? 0),
-    pausedAt: row.paused_at == null ? undefined : Number(row.paused_at),
-    createdAt: Number(row.created_at),
-    completedAt: row.completed_at == null ? undefined : Number(row.completed_at),
-  }));
+  return rows.map((row) => {
+    const settingsRecord = safeJsonRecord(row.settings_json);
+    const sessionSettings = toRecord(settingsRecord.settings);
+    return {
+      id: Number(row.id),
+      source: mapPracticeSource(row),
+      sourceName: String(row.source_name),
+      mode: String(row.mode),
+      accent: String(row.accent),
+      status: String(row.status),
+      wordCount: Number(row.word_count),
+      currentIndex: Number(settingsRecord.currentIndex ?? 0),
+      settings: Object.keys(sessionSettings).length ? sessionSettings : undefined,
+      durationSec: Number(row.duration_sec),
+      pausedDurationSec: Number(row.paused_duration_sec ?? 0),
+      pausedAt: row.paused_at == null ? undefined : Number(row.paused_at),
+      createdAt: Number(row.created_at),
+      completedAt: row.completed_at == null ? undefined : Number(row.completed_at),
+    };
+  });
 }
 
 function findResults(database: DatabaseSync) {
