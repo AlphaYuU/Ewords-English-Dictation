@@ -1,4 +1,4 @@
-import type { CSSProperties, PointerEvent } from "react";
+import type { PointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -16,7 +16,6 @@ import {
   ProgressBar,
   SegmentedControl,
   SessionTopActions,
-  Switch,
   useModalA11y,
 } from "@dictation/ui";
 import { ControlledAudioService } from "@dictation/audio";
@@ -25,6 +24,10 @@ import { exportHistoryCsv } from "@dictation/import-export";
 import { saveTextFile } from "../services/desktop-bridge";
 import { usePracticeStore } from "../stores/practice-store";
 import { resolveSetupWords } from "../stores/app-store";
+import { ChoiceCardGroup, SettingSwitch, SummaryTile } from "../features/practice/setup-components";
+import { estimateDurationLabel, panelStyle } from "../features/practice/setup-utils";
+import { DictationResultTable, PaperGradingTable } from "../features/practice/result-components";
+import { filterDictationResults, resultSummaryMeta, type ResultFilter } from "../features/practice/result-utils";
 
 const audio = new ControlledAudioService();
 
@@ -408,82 +411,6 @@ function samePracticeSource(left: PracticeSource, right: PracticeSource): boolea
   }
   return true;
 }
-
-function SummaryTile({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
-  return <div style={{ padding: 12, borderRadius: 10, background: "var(--surface-muted)", textAlign: "center" }}><span className="page-subtitle">{label}</span><strong style={{ display: "block", fontSize: 24, color: accent ? "var(--accent-primary)" : undefined }}>{value}</strong></div>;
-}
-
-function estimateDurationLabel(wordCount: number, playCount: number, intervalSec: number): string {
-  if (!wordCount) return "约 0 分钟";
-  const seconds = wordCount * (playCount * 2.5 + intervalSec);
-  const minutes = Math.max(1, Math.round(seconds / 60));
-  return `约 ${minutes} 分钟`;
-}
-
-function ChoiceCardGroup<T extends string>({
-  options,
-  value,
-  onChange,
-  selectedTone,
-  subtitles,
-  icons,
-}: {
-  options: { label: string; value: T }[];
-  value: T;
-  onChange: (value: T) => void;
-  selectedTone: "warm" | "cool";
-  subtitles?: Partial<Record<T, string>>;
-  icons?: Partial<Record<T, Parameters<typeof Icon>[0]["name"]>>;
-}) {
-  return (
-    <div className={`practice-choice-grid practice-choice-${selectedTone}`}>
-      {options.map((option) => (
-        <ChoiceCardButton
-          key={option.value}
-          label={option.label}
-          selected={option.value === value}
-          subtitle={subtitles?.[option.value]}
-          icon={icons?.[option.value]}
-          onClick={() => onChange(option.value)}
-        />
-      ))}
-    </div>
-  );
-}
-
-function ChoiceCardButton({
-  label,
-  selected,
-  subtitle,
-  icon,
-  onClick,
-}: {
-  label: string;
-  selected: boolean;
-  subtitle?: string;
-  icon?: Parameters<typeof Icon>[0]["name"];
-  onClick: () => void;
-}) {
-  return (
-    <button type="button" className={`practice-choice-card ${selected ? "is-selected" : ""}`} onClick={onClick}>
-      {icon ? <Icon name={icon} size={18} /> : null}
-      <strong>{label}</strong>
-      {subtitle ? <span>{subtitle}</span> : null}
-    </button>
-  );
-}
-
-function SettingSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange?: (checked: boolean) => void }) {
-  const [local, setLocal] = useState(checked);
-  return <div className="setting-item"><span>{label}</span><Switch checked={onChange ? checked : local} onChange={onChange ?? setLocal} /></div>;
-}
-
-const panelStyle: CSSProperties = {
-  padding: 20,
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 14,
-  background: "var(--surface-card)",
-};
 
 function sourceLabel(source: PracticeSource, libraries: { id: number; name: string }[], units: { id: number; name: string }[]) {
   if (source.sourceType === "library") return libraries.find((library) => library.id === source.sourceId)?.name ?? "词库";
@@ -1401,7 +1328,7 @@ export function DictationResultTypingPage() {
   const results = useMemo(() => allResults.filter((row) => row.sessionId === Number(sessionId)), [allResults, sessionId]);
   const session = useMemo(() => sessions.find((item) => item.id === Number(sessionId)), [sessionId, sessions]);
   const words = useMemo(() => allWords.filter((word) => results.some((row) => row.wordId === word.id)), [allWords, results]);
-  const [filter, setFilter] = useState<"all" | "correct" | "wrong" | "wrong_book" | "favorite">("all");
+  const [filter, setFilter] = useState<ResultFilter>("all");
   const [pendingWrongBookWord, setPendingWrongBookWord] = useState<VocabularyWord | null>(null);
   const summary = summarizeResults(results, session?.durationSec ?? 0);
   const filteredResults = useMemo(() => filterDictationResults(results, filter), [filter, results]);
@@ -1464,73 +1391,6 @@ export function DictationResultTypingPage() {
       />
     </>
   );
-}
-
-function filterDictationResults(
-  results: DictationResult[],
-  filter: "all" | "correct" | "wrong" | "wrong_book" | "favorite",
-) {
-  if (filter === "correct") return results.filter((row) => row.result === "correct");
-  if (filter === "wrong") return results.filter((row) => row.result === "wrong" || row.result === "skipped" || row.result === "unmarked");
-  if (filter === "wrong_book") return results.filter((row) => row.isAddedToWrongBook);
-  if (filter === "favorite") return results.filter((row) => row.isFavorited);
-  return results;
-}
-
-function DictationResultTable({
-  results,
-  words,
-  onFavorite,
-  onWrongBook,
-}: {
-  results: DictationResult[];
-  words: VocabularyWord[];
-  onFavorite: (wordId: number) => void;
-  onWrongBook: (word: VocabularyWord) => void;
-}) {
-  const wordsById = new Map(words.map((word) => [word.id, word]));
-  return (
-    <div className="dictation-result-table">
-      <div className="dictation-result-row dictation-result-header">
-        <span>正确答案</span>
-        <span>用户答案</span>
-        <span>释义</span>
-        <span>收藏</span>
-        <span>错题本</span>
-      </div>
-      {results.map((result) => {
-        const word = wordsById.get(result.wordId);
-        const status = result.result === "correct" ? "correct" : result.result === "wrong" || result.result === "skipped" ? "wrong" : "empty";
-        return (
-          <div key={result.id} className="dictation-result-row">
-            <span className={`result-answer ${status}`}>
-              <i />
-              <strong>{result.correctAnswer || result.word}</strong>
-            </span>
-            <span>{result.userAnswer ? `${result.userAnswer}${result.result === "correct" ? " ✓" : ""}` : "空白"}</span>
-            <span>{word?.partOfSpeech ? `${word.partOfSpeech} ${result.meaning}` : result.meaning}</span>
-            <IconButton icon="star" size="sm" label={word?.isFavorite ? "取消收藏" : "收藏"} active={Boolean(word?.isFavorite)} onClick={() => onFavorite(result.wordId)} />
-            <Button variant={word?.inWrongBook ? "danger" : "secondary"} size="sm" disabled={!word} onClick={() => word && onWrongBook(word)}>
-              {word?.inWrongBook ? "移出" : "加入"}
-            </Button>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function formatResultDate(timestamp?: number): string {
-  if (!timestamp) return "";
-  return new Date(timestamp).toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" }).replace(/\//g, "/");
-}
-
-function resultSummaryMeta(sourceName: string, modeLabel: "打字" | "纸笔", accent: Accent, timestamp?: number): string[] {
-  const date = formatResultDate(timestamp);
-  return [
-    `来源：${sourceName}`,
-    `模式：${modeLabel} · 发音：${accent === "uk" ? "英音" : "美音"}${date ? ` · ${date}` : ""}`,
-  ];
 }
 
 export function DictationResultPaperPage() {
@@ -1605,55 +1465,3 @@ export function DictationResultPaperPage() {
   );
 }
 
-function PaperGradingTable({
-  results,
-  words,
-  onFavorite,
-  onWrongBook,
-  onMark,
-}: {
-  results: DictationResult[];
-  words: VocabularyWord[];
-  onFavorite: (wordId: number) => void;
-  onWrongBook: (word: VocabularyWord) => void;
-  onMark: (resultId: number, result: "correct" | "wrong") => void;
-}) {
-  const wordsById = new Map(words.map((word) => [word.id, word]));
-  return (
-    <div className="paper-grading-table">
-      <div className="paper-grading-row paper-grading-header">
-        <span>#</span>
-        <span>收藏</span>
-        <span>单词</span>
-        <span>释义</span>
-        <span>批改</span>
-        <span>错题本</span>
-      </div>
-      <div className="paper-grading-body">
-        {results.map((result, index) => {
-          const word = wordsById.get(result.wordId);
-          const isCorrect = result.result === "correct";
-          const isWrong = result.result === "wrong" || result.result === "skipped";
-          return (
-            <div key={result.id} className="paper-grading-row">
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              <IconButton icon="star" size="sm" label={word?.isFavorite ? "取消收藏" : "收藏"} active={Boolean(word?.isFavorite)} onClick={() => onFavorite(result.wordId)} />
-              <span className={isCorrect ? "paper-word-correct" : result.result === "wrong" ? "paper-word-wrong" : ""}>
-                <strong>{result.correctAnswer || result.word}</strong>
-                {word?.phonetic ? <small>{word.phonetic}</small> : null}
-              </span>
-              <span>{word?.partOfSpeech ? `${word.partOfSpeech} ${result.meaning}` : result.meaning}</span>
-              <span className="paper-grading-actions">
-                <Button variant={isCorrect ? "primary" : "secondary"} size="sm" iconStart={<Icon name="check" size={14} />} onClick={() => onMark(result.id, "correct")}>正确</Button>
-                <Button variant={!isCorrect && isWrong ? "danger" : "secondary"} size="sm" iconStart={<Icon name="x" size={14} />} onClick={() => onMark(result.id, "wrong")}>错误</Button>
-              </span>
-              <Button variant={word?.inWrongBook ? "danger" : "secondary"} size="sm" disabled={!word} onClick={() => word && onWrongBook(word)}>
-                {word?.inWrongBook ? "移出" : "加入"}
-              </Button>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}

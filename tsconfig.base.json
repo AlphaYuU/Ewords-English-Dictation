@@ -24,8 +24,7 @@
       "@dictation/dictation-engine": ["packages/dictation-engine/src/index.ts"],
       "@dictation/dictionary-engine": ["packages/dictionary-engine/src/index.ts"],
       "@dictation/import-export": ["packages/import-export/src/index.ts"],
-      "@dictation/audio": ["packages/audio/src/index.ts"],
-      "@dictation/shared": ["packages/shared/src/index.ts"]
+      "@dictation/audio": ["packages/audio/src/index.ts"]
     }
   },
   "include": [

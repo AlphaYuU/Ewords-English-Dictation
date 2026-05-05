@@ -46,7 +46,10 @@ export function DialogHost() {
   const [importTargetLibraryId, setImportTargetLibraryId] = useState<number | null>(null);
   const [lastImportTargetLibraryId, setLastImportTargetLibraryId] = useState<number | null>(null);
   const [importSubmitting, setImportSubmitting] = useState(false);
+  const [importSuccessTitle, setImportSuccessTitle] = useState("导入成功");
+  const [importSuccessDescription, setImportSuccessDescription] = useState("单词已经导入目标词库。");
   const [cacheClearResult, setCacheClearResult] = useState<{ removedFiles: number; removedBytes: number } | null>(null);
+  const validPreviewRows = importPreviewRows.filter((row) => row.word && row.status !== "error");
   const importablePreviewRows = importPreviewRows.filter((row) => row.word && row.action === "add" && row.status !== "error");
   const importTargetLibraries = libraries.filter((library) => library.type === "custom" || library.type === "official");
   const defaultImportTargetLibraryId =
@@ -121,18 +124,20 @@ export function DialogHost() {
     buildImportPreview(text, existingWordsForImportTarget(targetLibraryId));
   const prepareImportPreview = (text: string, fileName = "", targetLibraryId = resolvedImportTargetLibraryId) => {
     const nextRows = buildTargetImportPreview(text, targetLibraryId);
-    const hasImportableRows = nextRows.some((row) => row.word && row.status !== "error" && row.action === "add");
+    const hasPreviewableRows = nextRows.some((row) => row.word && row.status !== "error");
     flushSync(() => {
       setImportText(text);
       setImportFileName(fileName);
       setImportPreviewRows(nextRows);
       setImportFailureReason("文件为空、格式不支持或解析错误。");
+      setImportSuccessTitle("导入成功");
+      setImportSuccessDescription("单词已经导入目标词库。");
     });
     if (!text.trim()) {
       showImportFailure("文件为空或没有可读取的文本内容。");
       return false;
     }
-    if (!hasImportableRows) {
+    if (!hasPreviewableRows) {
       showImportFailure("未识别到可导入的单词。请确认第一列是单词，第二列是释义。");
       return false;
     }
@@ -157,8 +162,16 @@ export function DialogHost() {
   };
   const handleConfirmImport = async () => {
     if (!resolvedImportTargetLibraryId || importSubmitting) return;
-    setImportSubmitting(true);
     setLastImportTargetLibraryId(resolvedImportTargetLibraryId);
+    if (!importablePreviewRows.length && validPreviewRows.length) {
+      setImportSuccessTitle("导入完成");
+      setImportSuccessDescription("没有新增单词，重复词已跳过。");
+      openDialog("import-success");
+      return;
+    }
+    setImportSubmitting(true);
+    setImportSuccessTitle("导入成功");
+    setImportSuccessDescription("单词已经导入目标词库。");
     const ok = await importWords(importablePreviewRows, resolvedImportTargetLibraryId);
     setImportSubmitting(false);
     if (!ok) showImportFailure("导入写入失败，请重试。");
@@ -259,6 +272,8 @@ export function DialogHost() {
     const addPendingWord = (libraryId: number) => {
       if (!sourceWord) return;
       setLastImportTargetLibraryId(libraryId);
+      setImportSuccessTitle("导入成功");
+      setImportSuccessDescription("单词已经导入目标词库。");
       void importWords(
         [
           {
@@ -542,14 +557,14 @@ export function DialogHost() {
   }
   if (dialog === "import-preview") {
     return (
-      <Dialog open title="导入预览" onClose={closeDialog} large footer={<><Button variant="secondary" size="dialog" onClick={closeDialog}>取消</Button><Button variant="primary" size="dialog" disabled={!importablePreviewRows.length || !resolvedImportTargetLibraryId || importSubmitting} onClick={handleConfirmImport}>{importSubmitting ? "导入中" : "确认导入"}</Button></>}>
+      <Dialog open title="导入预览" onClose={closeDialog} large footer={<><Button variant="secondary" size="dialog" onClick={closeDialog}>取消</Button><Button variant="primary" size="dialog" disabled={!validPreviewRows.length || !resolvedImportTargetLibraryId || importSubmitting} onClick={handleConfirmImport}>{importSubmitting ? "导入中" : "确认导入"}</Button></>}>
         <p className="dialog-subtitle">
           导入到 {importTargetLibrary?.name ?? "目标词库"}{importFileName ? ` · ${importFileName}` : ""}
         </p>
         <div className="word-table">
           {importPreviewRows.map((row) => (
             <div className="word-row" key={row.tempId} style={{ gridTemplateColumns: "80px 160px 1fr 120px" }}>
-              <span>{row.rowIndex}</span><span>{row.word}</span><span>{row.meaning}</span><span>{row.status}</span>
+              <span>{row.rowIndex}</span><span>{row.word}</span><span>{row.meaning}</span><span>{importPreviewStatusLabel(row)}</span>
             </div>
           ))}
         </div>
@@ -607,8 +622,8 @@ export function DialogHost() {
     return (
       <NoticeDialog
         open
-        title="导入成功"
-        description="单词已经导入目标词库。"
+        title={importSuccessTitle}
+        description={importSuccessDescription}
         cancelText="查看词库"
         confirmText="确定"
         onConfirm={closeDialog}
@@ -648,6 +663,13 @@ function uniqueDictionaryEntries(entries: DictionaryEntry[]): DictionaryEntry[] 
     unique.push(entry);
   }
   return unique;
+}
+
+function importPreviewStatusLabel(row: ImportPreviewRow): string {
+  if (row.status === "duplicate") return "已存在，跳过";
+  if (row.status === "error") return row.errorMessage ?? "格式错误";
+  if (row.status === "unmatched" && !row.meaning) return "释义缺失";
+  return "将导入";
 }
 
 function useDebouncedValue(value: string, delayMs: number): string {

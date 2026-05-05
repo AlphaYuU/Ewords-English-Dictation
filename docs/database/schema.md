@@ -12,12 +12,20 @@ Implemented tables:
 - `vocabulary_word_units`
 - `dictation_sessions`
 - `dictation_results`
-- `wrong_book_words`
-- `favorite_words`
+- `user_word_state`
+- `wrong_book_entries`
+- `favorite_entries`
 - `app_settings`
 - `search_history`
 - `import_tasks`
 - `import_preview_rows`
+
+Compatibility tables still present in the migration:
+
+- `wrong_book_words`
+- `favorite_words`
+
+Current runtime reads and writes the word-level user state through `user_word_state`, `wrong_book_entries`, and `favorite_entries`. The compatibility tables are kept so older databases can migrate without data loss.
 
 Run:
 

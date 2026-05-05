@@ -17,9 +17,8 @@ Current implementation includes a working React desktop UI backed by Zustand sta
 - `packages/dictation-engine`: grading and dictation state machine.
 - `packages/dictionary-engine`: English / Chinese / fuzzy dictionary search.
 - `packages/import-export`: CSV/TXT parsing and CSV export helpers.
-- `packages/audio`: browser speech based audio abstraction.
-- `packages/shared`: shared response and formatting helpers.
+- `packages/audio`: Piper-backed desktop bridge audio abstraction for controlled UK / US pronunciation.
 
 ## Desktop App
 
-`apps/desktop` contains Electron shell files and the Vite React renderer. The renderer implements all documented desktop routes and dialog entry points using copied handoff reference assets only for QA, not runtime UI.
+`apps/desktop` contains Electron shell files and the Vite React renderer. The renderer implements the desktop routes, dialog entry points, IPC bridge, and local data hydration flow used by the packaged app.

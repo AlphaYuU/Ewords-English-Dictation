@@ -120,9 +120,6 @@ importers:
       '@dictation/import-export':
         specifier: workspace:*
         version: link:../../packages/import-export
-      '@dictation/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       '@dictation/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -140,8 +137,6 @@ importers:
   packages/domain: {}
 
   packages/import-export: {}
-
-  packages/shared: {}
 
   packages/ui:
     dependencies:

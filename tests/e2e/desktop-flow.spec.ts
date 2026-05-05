@@ -138,6 +138,7 @@ test.beforeEach(async ({ page }) => {
       [13, "abandon", "ә'bændәn", "vt. 放弃, 抛弃, 遗弃, 使屈从", "v."],
       [13, "ability", "ә'biliti", "n. 能力, 才干", "n."],
       [17, "apple", "'æpl", "n. 苹果, 家伙 [医] 苹果", "n."],
+      [16, "apple", "'æpl", "n. 苹果, 家伙 [医] 苹果", "n."],
     ];
     const state: MockState = {
       libraries: [
@@ -404,6 +405,24 @@ test("word detail adds to dictation list without leaving detail page", async ({ 
   await expect(page.getByRole("button", { name: "加入听写列表" })).toBeVisible();
 });
 
+test("dictation source follows the dictionary detail entry point", async ({ page }) => {
+  await page.goto("/dictionary/entry/1019");
+  await page.getByRole("button", { name: "加入听写列表" }).click();
+  await expect(page.getByRole("button", { name: "已加入听写列表" })).toBeVisible();
+  await page.getByRole("button", { name: "开始听写" }).click();
+  await expect(page.getByText("词典 · 1词")).toBeVisible();
+  await expect(page.getByText("中考英语 · 1词")).toHaveCount(0);
+});
+
+test("dictation source follows the library word entry point", async ({ page }) => {
+  await page.goto("/words/1020");
+  await page.getByRole("button", { name: "加入听写列表" }).click();
+  await expect(page.getByRole("button", { name: "已加入听写列表" })).toBeVisible();
+  await page.getByRole("button", { name: "开始听写" }).click();
+  await expect(page.getByText("高考英语 · 1词")).toBeVisible();
+  await expect(page.getByText("中考英语 · 1词")).toHaveCount(0);
+});
+
 test("library shelf uses built-in names, labels, and unified color", async ({ page }) => {
   await page.goto("/library");
   await expect(page.getByText("IELTS")).toBeVisible();
@@ -440,6 +459,20 @@ test("word detail add-to-library success dialog has view and confirm actions", a
   await expect(page.getByRole("button", { name: "查看词库" })).toBeVisible();
   await page.getByRole("button", { name: "确定" }).click();
   await expect(page).toHaveURL(/\/words\/\d+$/);
+});
+
+test("import preview allows duplicate-only rows and skips them as completed", async ({ page }) => {
+  await page.goto("/library");
+  await page.locator(".page-actions").getByRole("button", { name: "导入单词" }).click();
+  await expect(page.getByRole("heading", { name: "导入单词" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /IELTS/ })).toBeVisible();
+  await page.locator("textarea").fill("word,meaning\nability,能力");
+  await page.getByRole("button", { name: "预览导入" }).click();
+  await expect(page.getByRole("heading", { name: "导入预览" })).toBeVisible();
+  await expect(page.getByText("已存在，跳过")).toBeVisible();
+  await page.getByRole("button", { name: "确认导入" }).click();
+  await expect(page.getByRole("heading", { name: "导入完成" })).toBeVisible();
+  await expect(page.getByText("没有新增单词，重复词已跳过。")).toBeVisible();
 });
 
 test("create library dialog supports editable tags and cover colors", async ({ page }) => {

@@ -19,13 +19,29 @@ import type {
   VocabularyUnit,
   VocabularyWord,
 } from "@dictation/domain";
-import { defaultGradingRules, defaultPlaybackSettings, defaultSettings } from "@dictation/domain";
+import { defaultSettings } from "@dictation/domain";
 import { gradeAnswer } from "@dictation/dictation-engine";
 import { summarizeResults } from "@dictation/domain";
 import type { ImportPreviewRow } from "@dictation/import-export";
 import type { AppBootstrap } from "../services/desktop-bridge";
 import { loadDesktopBootstrap, runDesktopDatabaseMutation } from "../services/desktop-bridge";
 import { normalizeLibrariesForDisplay } from "../services/library-display";
+import { loadPracticeSetup, persistPracticeSetupSettings, resetPracticeSetupSettings } from "./practice-setup-persistence";
+import { resolveSetupWords, shuffleWords } from "./practice-word-resolver";
+import {
+  createTransientDictionaryWord,
+  ensureWordInCollection,
+  findPracticeWordForDictionaryEntry,
+  normalizeWordKey,
+  resolveWordTarget,
+  sameResultIdentity,
+  sameWordIdentity,
+  updateWordForManualMark,
+  updateWordsForResultTransition,
+  wordIdentity,
+} from "./word-state-transitions";
+
+export { resolveSetupWords } from "./practice-word-resolver";
 
 type DialogName =
   | "create-library"
@@ -134,91 +150,6 @@ type CreateLibraryInput = {
 };
 
 type AppBackup = Partial<Pick<AppState, "libraries" | "units" | "words" | "sessions" | "results" | "history" | "searchHistory" | "settings">>;
-type PersistedPracticeSetup = Omit<PracticeSetup, "source" | "sampleWordIds">;
-
-const PRACTICE_SETTINGS_STORAGE_KEY = "dictation.practice-settings.v1";
-
-function createDefaultPracticeSetup(): PracticeSetup {
-  return {
-    source: { sourceType: "none" },
-    mode: "typing",
-    accent: "uk",
-    orderMode: "sequence",
-    sampleCount: 1,
-    showChineseHint: false,
-    playbackSettings: defaultPlaybackSettings,
-    gradingRules: defaultGradingRules,
-  };
-}
-
-function loadPracticeSetup(): PracticeSetup {
-  const defaults = createDefaultPracticeSetup();
-  if (typeof window === "undefined") return defaults;
-  try {
-    const raw = window.localStorage.getItem(PRACTICE_SETTINGS_STORAGE_KEY);
-    if (!raw) return defaults;
-    const persisted = JSON.parse(raw) as Partial<PersistedPracticeSetup>;
-    return {
-      ...defaults,
-      mode: persisted.mode === "paper" ? "paper" : "typing",
-      accent: persisted.accent === "us" ? "us" : "uk",
-      orderMode: persisted.orderMode === "random" || persisted.orderMode === "sample" ? persisted.orderMode : "sequence",
-      sampleCount: Number.isFinite(persisted.sampleCount) ? Math.max(1, Math.round(Number(persisted.sampleCount))) : defaults.sampleCount,
-      sampleWordIds: undefined,
-      showChineseHint: persisted.showChineseHint === true,
-      playbackSettings: {
-        playCount: persisted.playbackSettings?.playCount === 1 || persisted.playbackSettings?.playCount === 3 ? persisted.playbackSettings.playCount : 2,
-        intervalSec:
-          persisted.playbackSettings?.intervalSec === 10 || persisted.playbackSettings?.intervalSec === 15 ? persisted.playbackSettings.intervalSec : 5,
-        speed: persisted.playbackSettings?.speed === 0.5 || persisted.playbackSettings?.speed === 1.5 ? persisted.playbackSettings.speed : 1,
-        allowReplay: persisted.playbackSettings?.allowReplay !== false,
-        autoPlayNext: persisted.playbackSettings?.autoPlayNext !== false,
-      },
-      gradingRules: {
-        ...defaults.gradingRules,
-        ignoreCase: persisted.gradingRules?.ignoreCase !== false,
-        trimWhitespace: persisted.gradingRules?.trimWhitespace !== false,
-        acceptUkUs: persisted.gradingRules?.acceptUkUs !== false,
-        collapseSpaces: persisted.gradingRules?.collapseSpaces !== false,
-        strictHyphen: persisted.gradingRules?.strictHyphen === true,
-        strictApostrophe: persisted.gradingRules?.strictApostrophe === true,
-        skippedAsWrong: persisted.gradingRules?.skippedAsWrong === true,
-      },
-    };
-  } catch {
-    return defaults;
-  }
-}
-
-function persistPracticeSetupSettings(setup: PracticeSetup): void {
-  if (typeof window === "undefined") return;
-  const persisted: PersistedPracticeSetup = {
-    mode: setup.mode,
-    accent: setup.accent,
-    orderMode: setup.orderMode,
-    sampleCount: setup.sampleCount,
-    showChineseHint: setup.showChineseHint,
-    playbackSettings: setup.playbackSettings,
-    gradingRules: setup.gradingRules,
-  };
-  try {
-    window.localStorage.setItem(PRACTICE_SETTINGS_STORAGE_KEY, JSON.stringify(persisted));
-  } catch {
-    // Local persistence is best-effort; the running setup should still update.
-  }
-}
-
-function resetPracticeSetupSettings(): PracticeSetup {
-  const setup = createDefaultPracticeSetup();
-  if (typeof window !== "undefined") {
-    try {
-      window.localStorage.removeItem(PRACTICE_SETTINGS_STORAGE_KEY);
-    } catch {
-      // Local persistence is best-effort; clearing app data should continue.
-    }
-  }
-  return setup;
-}
 
 function emptyDataState(): Partial<AppState> {
   return {
@@ -692,7 +623,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   queueDictionaryEntryForDictation: (entry) => {
     const state = get();
-    const existingWord = findPracticeWordForDictionaryEntry(state.words, entry);
+    const existingWord = state.words.find((word) => word.transientSource === "dictionary" && (word.dictionaryEntryId === entry.id || word.id === -Math.abs(entry.id)));
     const word = existingWord ?? createTransientDictionaryWord(entry);
     const queuedWordIds = state.setup.source.sourceType === "words" ? state.setup.source.wordIds : [];
     const nextWords = existingWord ? state.words : [...state.words, word];
@@ -1123,213 +1054,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 }));
 
-export function resolveSetupWords(setup: PracticeSetup, words: VocabularyWord[], results: DictationResult[] = []): VocabularyWord[] {
-  const source = setup.source;
-  const select = (items: VocabularyWord[]) => {
-    if (setup.orderMode !== "sample") return items;
-    if (setup.sampleWordIds?.length) {
-      const byId = new Map(items.map((word) => [word.id, word]));
-      return setup.sampleWordIds.map((wordId) => byId.get(wordId)).filter((word): word is VocabularyWord => Boolean(word));
-    }
-    return items.slice(0, setup.sampleCount ?? items.length);
-  };
-  switch (source.sourceType) {
-    case "library":
-      return select(words.filter((word) => word.libraryId === source.sourceId));
-    case "unit":
-      return select(words.filter((word) => word.unitIds?.includes(source.sourceId)));
-    case "wrong_book":
-      return select(dedupeWordsByIdentity(words.filter((word) => word.inWrongBook)));
-    case "favorite":
-      return select(dedupeWordsByIdentity(words.filter((word) => word.isFavorite)));
-    case "history_session":
-      {
-        const sessionResults = results
-          .filter((row) => row.sessionId === source.sourceId)
-          .filter((row) => !source.filter || source.filter === "all" || row.result === "wrong" || row.result === "skipped" || row.result === "unmarked" || row.isAddedToWrongBook)
-          .sort((left, right) => left.orderIndex - right.orderIndex);
-        const byId = new Map(words.map((word) => [word.id, word]));
-        return select(sessionResults.map((row) => byId.get(row.wordId) ?? createTransientDictionaryWordFromResult(row)).filter(Boolean) as VocabularyWord[]);
-      }
-    case "words":
-      {
-        const byId = new Map(words.map((word) => [word.id, word]));
-        return select(source.wordIds.map((wordId) => byId.get(wordId)).filter(Boolean) as VocabularyWord[]);
-      }
-    case "none":
-      return [];
-  }
-}
-
-function shuffleWords(words: VocabularyWord[]): VocabularyWord[] {
-  const next = words.slice();
-  for (let index = next.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
-  }
-  return next;
-}
-
-function dedupeWordsByIdentity(words: VocabularyWord[]): VocabularyWord[] {
-  const seen = new Set<string>();
-  const unique: VocabularyWord[] = [];
-  for (const word of words) {
-    const key = normalizeWordKey(word.wordKey ?? word.word);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(word);
-  }
-  return unique;
-}
-
 function normalizeTags(tags: string[] | undefined): string[] {
   if (!tags?.length) return [];
   return [...new Set(tags.map((tag) => tag.trim()).filter(Boolean))].slice(0, 8);
-}
-
-function normalizeWordKey(value: string): string {
-  return value.trim().toLowerCase();
-}
-
-function findPracticeWordForDictionaryEntry(words: VocabularyWord[], entry: DictionaryEntry): VocabularyWord | undefined {
-  const normalized = entry.word.trim().toLowerCase();
-  return words.find((word) => word.dictionaryEntryId === entry.id || word.word.trim().toLowerCase() === normalized);
-}
-
-function resolveWordTarget(state: AppState, wordId: number): VocabularyWord | null {
-  const existing = state.words.find((word) => word.id === wordId);
-  if (existing) return existing;
-  if (wordId < 0) {
-    const entry = state.dictionary.find((item) => item.id === Math.abs(wordId));
-    if (entry) return createTransientDictionaryWord(entry);
-  }
-  return null;
-}
-
-function ensureWordInCollection(words: VocabularyWord[], target: VocabularyWord): VocabularyWord[] {
-  return words.some((word) => word.id === target.id) ? words : [...words, target];
-}
-
-function createTransientDictionaryWord(entry: DictionaryEntry): VocabularyWord {
-  return {
-    id: -Math.abs(entry.id),
-    libraryId: 0,
-    dictionaryEntryId: entry.id,
-    wordKey: normalizeWordKey(entry.word),
-    transientSource: "dictionary",
-    word: entry.word,
-    meaning: entry.meaningCn,
-    phonetic: entry.usPhonetic ?? entry.ukPhonetic,
-    partOfSpeech: entry.partOfSpeech,
-    isFavorite: false,
-    inWrongBook: false,
-    masteryLevel: 0,
-    wrongCount: 0,
-    dictationCount: 0,
-    addedAt: Date.now(),
-  };
-}
-
-function createTransientDictionaryWordFromResult(result: DictationResult): VocabularyWord {
-  return {
-    id: result.wordId,
-    libraryId: 0,
-    transientSource: "dictionary",
-    wordKey: normalizeWordKey(result.correctAnswer || result.word),
-    word: result.correctAnswer || result.word,
-    meaning: result.meaning,
-    isFavorite: result.isFavorited,
-    inWrongBook: result.isAddedToWrongBook,
-    masteryLevel: 0,
-    wrongCount: result.result === "wrong" || result.result === "skipped" || result.result === "unmarked" ? 1 : 0,
-    dictationCount: result.result === "unmarked" ? 0 : 1,
-    addedAt: result.id,
-  };
-}
-
-function wordIdentity(word: Pick<VocabularyWord, "dictionaryEntryId" | "word" | "wordKey">): { dictionaryEntryId?: number; wordKey: string } {
-  return {
-    dictionaryEntryId: word.dictionaryEntryId,
-    wordKey: normalizeWordKey(word.wordKey ?? word.word),
-  };
-}
-
-function sameWordIdentity(left: VocabularyWord, right: VocabularyWord): boolean {
-  if (left.dictionaryEntryId != null && right.dictionaryEntryId != null && left.dictionaryEntryId === right.dictionaryEntryId) return true;
-  return normalizeWordKey(left.wordKey ?? left.word) === normalizeWordKey(right.wordKey ?? right.word);
-}
-
-function sameResultIdentity(result: DictationResult, identity: { dictionaryEntryId?: number; wordKey: string }): boolean {
-  if (!identity.wordKey) return false;
-  return normalizeWordKey(result.correctAnswer || result.word) === identity.wordKey;
-}
-
-function updateWordsForResultTransition(
-  words: VocabularyWord[],
-  wordId: number,
-  previousResult: DictationResultStatus,
-  nextResult: DictationResultStatus,
-  markedAt: number,
-): { words: VocabularyWord[]; target?: VocabularyWord } {
-  const target = words.find((word) => word.id === wordId);
-  if (!target) return { words };
-  let updatedTarget: VocabularyWord | undefined;
-  const updatedWords = words.map((word) => {
-    if (!sameWordIdentity(word, target)) return word;
-    const updated = updateWordForResultTransition(word, previousResult, nextResult, markedAt);
-    if (word.id === target.id) updatedTarget = updated;
-    return updated;
-  });
-  return { words: updatedWords, target: updatedTarget };
-}
-
-function updateWordForManualMark(
-  word: VocabularyWord,
-  previousResult: DictationResultStatus,
-  nextResult: DictationResultStatus,
-  markedAt: number,
-): VocabularyWord {
-  return updateWordForResultTransition(word, previousResult, nextResult, markedAt);
-}
-
-function updateWordForResultTransition(
-  word: VocabularyWord,
-  previousResult: DictationResultStatus,
-  nextResult: DictationResultStatus,
-  markedAt: number,
-): VocabularyWord {
-  const previousAnswered = previousResult !== "unmarked";
-  const nextAnswered = nextResult !== "unmarked";
-  const dictationDelta = previousAnswered === nextAnswered ? 0 : nextAnswered ? 1 : -1;
-  const wrongDelta = resultWrongCountScore(nextResult) - resultWrongCountScore(previousResult);
-  const masteryDelta = resultMasteryScore(nextResult) - resultMasteryScore(previousResult);
-  const masteryLevel = Math.max(0, Math.min(10, word.masteryLevel + masteryDelta));
-  const wrongCount = Math.max(0, word.wrongCount + wrongDelta);
-  const mastered = masteryLevel >= 10;
-  return {
-    ...word,
-    dictationCount: Math.max(0, word.dictationCount + dictationDelta),
-    wrongCount: mastered ? 0 : wrongCount,
-    inWrongBook: mastered ? false : nextResult === "wrong" ? true : word.inWrongBook,
-    masteryLevel,
-    lastDictatedAt: markedAt,
-  };
 }
 
 function sessionDurationSec(session: DictationSession | undefined, endedAt: number): number {
   if (!session) return 0;
   const activePauseSec = session.pausedAt ? Math.max(0, Math.round((endedAt - session.pausedAt) / 1000)) : 0;
   return Math.max(0, Math.round((endedAt - session.createdAt) / 1000) - (session.pausedDurationSec ?? 0) - activePauseSec);
-}
-
-function resultMasteryScore(result: DictationResultStatus): number {
-  if (result === "correct") return 2;
-  if (result === "wrong") return -1;
-  return 0;
-}
-
-function resultWrongCountScore(result: DictationResultStatus): number {
-  return result === "wrong" ? 1 : 0;
 }
 
 function resolveSourceName(setup: PracticeSetup, libraries: VocabularyLibrary[], words: VocabularyWord[]): string {

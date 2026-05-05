@@ -65,7 +65,7 @@ export function WordDetailPage() {
     [activeRemotePayload, localExamples],
   );
   const queuedWordIds = setup.source.sourceType === "words" ? setup.source.wordIds : [];
-  const dictationWord = dictionaryEntry ? findDictionaryQueueWord(dictionaryEntry, allWords) : entryMatchedWord;
+  const dictationWord = isDictionaryEntryRoute && dictionaryEntry ? findQueuedDictionaryEntryWord(dictionaryEntry, allWords) : entryMatchedWord;
   const isInDictationList = dictationWord ? queuedWordIds.includes(dictationWord.id) : false;
   const toggleDictationList = () => {
     if (isInDictationList) {
@@ -283,9 +283,8 @@ function toDetailWord(entry: DictionaryEntry): VocabularyWord {
   };
 }
 
-function findDictionaryQueueWord(entry: DictionaryEntry, words: VocabularyWord[]): VocabularyWord | undefined {
-  const normalized = entry.word.trim().toLowerCase();
-  return words.find((word) => word.dictionaryEntryId === entry.id || word.word.trim().toLowerCase() === normalized);
+function findQueuedDictionaryEntryWord(entry: DictionaryEntry, words: VocabularyWord[]): VocabularyWord | undefined {
+  return words.find((word) => word.transientSource === "dictionary" && (word.dictionaryEntryId === entry.id || word.id === -Math.abs(entry.id)));
 }
 
 function normalizeWordKey(value: string): string {

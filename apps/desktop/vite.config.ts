@@ -16,8 +16,7 @@ export default defineConfig({
       "@dictation/dictation-engine": path.resolve(root, "packages/dictation-engine/src/index.ts"),
       "@dictation/dictionary-engine": path.resolve(root, "packages/dictionary-engine/src/index.ts"),
       "@dictation/import-export": path.resolve(root, "packages/import-export/src/index.ts"),
-      "@dictation/audio": path.resolve(root, "packages/audio/src/index.ts"),
-      "@dictation/shared": path.resolve(root, "packages/shared/src/index.ts")
+      "@dictation/audio": path.resolve(root, "packages/audio/src/index.ts")
     }
   },
   server: {
@@ -26,6 +25,6 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
-    sourcemap: true
+    sourcemap: process.env.VITE_ENABLE_SOURCEMAP === "1"
   }
 });

@@ -18,7 +18,6 @@
     "@dictation/dictionary-engine": "workspace:*",
     "@dictation/domain": "workspace:*",
     "@dictation/import-export": "workspace:*",
-    "@dictation/shared": "workspace:*",
     "@dictation/ui": "workspace:*"
   }
 }
