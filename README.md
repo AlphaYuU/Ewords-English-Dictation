@@ -1,54 +1,44 @@
 # Ewords Dictation
 
-Desktop English dictation app for vocabulary libraries, dictionary lookup, local UK/US pronunciation, dictation practice, and history review.
+一款英语听写应用程序，内置雅思，托福，GRE，四六级，考研英语，高考英语和中考英语8个词库。具有英美音听写，词典搜索，错题本，历史回顾等功能。
 
 ## Stack
 
-- Electron + React + TypeScript + Vite
-- React Router
-- Zustand
-- SQLite through `node:sqlite`
-- Piper TTS for local pronunciation
-- Vitest and Playwright for verification
+Electron + React + TypeScript + Vite
+React Router
+Zustand
+SQLite through `node:sqlite`
+Piper TTS for local pronunciation
+Vitest and Playwright for verification
 
-## Commands
+## Development
+
+安装依赖：
 
 ```bash
 corepack pnpm install
-corepack pnpm dev
-corepack pnpm db:migrate
-corepack pnpm db:seed
-corepack pnpm lint
-corepack pnpm typecheck
-corepack pnpm test
-corepack pnpm build
 ```
 
-## Data
+创建数据库：
 
-- `data/raw` contains source dictionary, example, and official vocabulary files used by the seed scripts.
-- `data/processed/dictation.sqlite` is the generated development database. It is larger than GitHub's normal file limit, so distribute it through a release asset, Git LFS, or regenerate it locally with `corepack pnpm db:seed`.
-- `data/export/tatoeba_examples_and_attribution.csv` is used by the Settings page attribution export and should be included in packaged desktop releases.
+```bash
+corepack pnpm db:seed
+```
 
-## TTS
-
-Run the setup command on Windows before testing pronunciation:
+准备本地 Piper TTS：
 
 ```bash
 corepack pnpm tts:setup
 ```
 
-The app uses Piper TTS with local UK/US voices.
-
-## Verification
-
-Before publishing or packaging, run:
+启动：
 
 ```bash
-corepack pnpm typecheck
-corepack pnpm lint
-corepack pnpm test
-corepack pnpm build
+corepack pnpm dev
 ```
 
-For UI regressions, use the Playwright suites that match the change being tested.
+打包：
+
+```bash
+corepack pnpm package:win
+```
