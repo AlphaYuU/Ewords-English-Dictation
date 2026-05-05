@@ -1,5 +1,7 @@
 export * from "./db/client";
 export * from "./db/schema";
+export * from "./application/database-service";
+export * from "./application/types";
 export * from "./repositories/dictionary-entry-repository";
 export * from "./repositories/dictionary-example-repository";
 export * from "./repositories/dictation-result-repository";

@@ -73,7 +73,7 @@ process.on("SIGTERM", () => {
   process.exit(143);
 });
 
-await runBlocking(corepack, ["pnpm", "--filter", "@dictation/desktop", "exec", "tsc", "-p", "electron/tsconfig.json"]);
+await runBlocking(corepack, ["pnpm", "--filter", "@dictation/desktop", "exec", "vite", "build", "--config", "electron/vite.config.ts"]);
 await runBlocking(process.execPath, ["scripts/write-electron-preload-cjs.mjs"], { shell: false });
 
 if (!(await canReach(devUrl))) {

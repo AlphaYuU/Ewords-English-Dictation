@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "dev:electron": "tsx electron/main/main.ts",
-    "build": "vite build && tsc -p electron/tsconfig.json && node ../../scripts/write-electron-preload-cjs.mjs",
+    "build": "vite build && vite build --config electron/vite.config.ts && node ../../scripts/write-electron-preload-cjs.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
