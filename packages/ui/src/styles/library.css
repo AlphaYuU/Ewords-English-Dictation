@@ -1,0 +1,278 @@
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 18px;
+}
+
+.system-card-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 26px;
+}
+
+.library-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 220px;
+  padding: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface-card);
+  color: var(--foreground-primary);
+  text-align: left;
+  overflow: hidden;
+}
+
+.library-card.system {
+  height: 88px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 18px;
+  border: 0;
+  background: var(--card-color, var(--accent-primary));
+  color: var(--foreground-inverse);
+}
+
+.library-card.official,
+.library-card.custom {
+  background: var(--card-color, var(--surface-card));
+}
+
+.library-card.empty {
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--foreground-tertiary);
+}
+
+.library-label {
+  margin-bottom: 8px;
+  color: inherit;
+  font-size: 11px;
+  opacity: 0.8;
+  text-transform: uppercase;
+}
+
+.library-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.library-meta {
+  margin-top: auto;
+  color: var(--foreground-tertiary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.word-table-header {
+  grid-template-columns: 36px 200px 160px minmax(220px, 1fr) 70px 90px 80px;
+}
+
+.word-table.has-scrollbar .word-table-header {
+  padding-right: 35px;
+}
+
+.word-table-header span:last-child {
+  justify-self: end;
+  width: 54px;
+  text-align: center;
+}
+
+.word-table-header span:first-child {
+  text-align: center;
+}
+
+.word-row {
+  display: grid;
+  min-height: 46px;
+  align-items: center;
+  padding: 0 18px 0 28px;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-card);
+  grid-template-columns: 36px 200px 160px minmax(220px, 1fr) 70px 90px 80px;
+}
+
+.dictionary-entry-header,
+.dictionary-entry-row {
+  grid-template-columns: 190px 150px minmax(360px, 1fr) 90px 100px;
+}
+
+.dictionary-entry-row {
+  cursor: default;
+}
+
+.word-row.is-active {
+  background: var(--accent-primary);
+  color: var(--foreground-inverse);
+}
+
+.word-row-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.word-row-sub {
+  margin-top: 4px;
+  color: var(--foreground-tertiary);
+  font-size: 11px;
+}
+
+.word-row.is-active .word-row-sub {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.word-row-action {
+  justify-self: end;
+}
+
+.word-row > .icon-button:first-child {
+  justify-self: center;
+  margin-left: 0;
+}
+
+.word-table-body {
+  position: relative;
+}
+
+.word-table-body.is-virtualized {
+  height: 460px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.word-table-spacer {
+  position: relative;
+}
+
+.word-table-body.is-virtualized .word-row {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+}
+
+.setting-item {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--foreground-primary);
+}
+
+.library-edit-page {
+  position: absolute;
+  inset: 0;
+  padding: 34px 36px 28px;
+}
+
+.library-edit-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.library-edit-batch-bar {
+  display: flex;
+  height: 66px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 30px;
+  padding: 0 20px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: var(--surface-card);
+  color: var(--foreground-secondary);
+}
+
+.library-edit-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, 354px);
+  gap: 30px 32px;
+  margin-top: 28px;
+}
+
+.library-edit-card {
+  position: relative;
+  display: grid;
+  height: 190px;
+  align-content: start;
+  gap: 10px;
+  padding: 58px 24px 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: var(--surface-card);
+  color: var(--foreground-primary);
+  text-align: left;
+}
+
+.library-edit-card[draggable="true"] {
+  cursor: grab;
+}
+
+.library-edit-card.is-dragging {
+  opacity: 0.48;
+  transform: scale(0.98);
+}
+
+.library-edit-card > svg:first-child {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  color: var(--foreground-tertiary);
+}
+
+.library-edit-card strong {
+  font-size: 23px;
+  line-height: 1.2;
+}
+
+.library-edit-card small {
+  margin-top: 24px;
+  color: var(--foreground-tertiary);
+}
+
+.library-edit-check {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-primary);
+  color: var(--foreground-inverse);
+}
+
+.library-edit-card.is-selected .library-edit-check {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary);
+}
+
+.library-edit-create {
+  place-items: center;
+  align-content: center;
+  padding: 0;
+  color: var(--foreground-tertiary);
+  text-align: center;
+}
+

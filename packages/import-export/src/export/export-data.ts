@@ -18,7 +18,7 @@ export function exportLibraryCsv(library: VocabularyLibrary, words: VocabularyWo
 export function exportHistoryCsv(results: DictationResult[]): string {
   const rows = [["word", "userAnswer", "correctAnswer", "meaning", "result"]];
   for (const row of results) rows.push([row.word, row.userAnswer ?? "", row.correctAnswer, row.meaning, row.result]);
-  return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+  return `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\n")}`;
 }
 
 export function exportHistoryListCsv(history: HistoryItem[]): string {

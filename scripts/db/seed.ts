@@ -27,11 +27,15 @@ function resetSeededData(): void {
     PRAGMA foreign_keys = OFF;
     DELETE FROM import_preview_rows;
     DELETE FROM import_tasks;
+    DELETE FROM practice_queue_items;
     DELETE FROM search_history;
     DELETE FROM dictation_results;
     DELETE FROM dictation_sessions;
     DELETE FROM favorite_words;
     DELETE FROM wrong_book_words;
+    DELETE FROM favorite_entries;
+    DELETE FROM wrong_book_entries;
+    DELETE FROM user_word_state;
     DELETE FROM vocabulary_word_units;
     DELETE FROM vocabulary_words;
     DELETE FROM vocabulary_units;
@@ -47,6 +51,7 @@ function resetSeededData(): void {
       'vocabulary_words',
       'dictation_sessions',
       'dictation_results',
+      'practice_queue_items',
       'search_history'
     );
     PRAGMA foreign_keys = ON;

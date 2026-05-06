@@ -1,6 +1,22 @@
 import type { DictationResult, VocabularyWord } from "@dictation/domain";
 import { Button, Icon, IconButton } from "@dictation/ui";
 
+export function PreviousResult({ result }: { result: { result: string; word: string; correctAnswer: string; meaning: string } }) {
+  const isCorrect = result.result === "correct";
+  return (
+    <div className="previous-result">
+      <span className={`previous-result-mark ${isCorrect ? "is-correct" : "is-wrong"}`}>{isCorrect ? "✓" : "!"}</span>
+      <div>
+        <p>
+          上一题 · {isCorrect ? "正确" : "错误"}
+        </p>
+        <strong>{result.correctAnswer || result.word}</strong>
+        <span> · {result.meaning}</span>
+      </div>
+    </div>
+  );
+}
+
 export function DictationResultTable({
   results,
   words,

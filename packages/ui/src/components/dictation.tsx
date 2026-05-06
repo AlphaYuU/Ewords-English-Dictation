@@ -25,9 +25,9 @@ export function DictationPlayer({
   disablePlay?: boolean;
 }) {
   return (
-    <section style={{ display: "grid", placeItems: "center", height: 460, borderRadius: 20, background: "var(--accent-primary)", color: "var(--foreground-inverse)" }}>
-      <div style={{ textAlign: "center" }}>
-        <div className="chip" style={{ background: "var(--accent-warning)", border: 0, color: "var(--foreground-primary)", marginBottom: 26 }}>{round}</div>
+    <section className="dictation-player">
+      <div className="dictation-player-content">
+        <div className="chip dictation-round-chip">{round}</div>
         <div><DictationPlayButton playing={playing} disabled={disablePlay} onClick={onPlay} /></div>
         {hint ? <p style={{ marginTop: 28 }}>{hint}</p> : null}
         {children}
@@ -60,7 +60,7 @@ export function DictationControlBar({
   submitLabel?: string;
 }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "180px 180px 180px 180px 220px", gap: 48, marginTop: 30 }}>
+    <div className="dictation-control-bar">
       <Button variant="secondary" size="lg" iconStart={<Icon name="back" />} disabled={disablePrevious} onClick={onPrevious}>上一词</Button>
       <Button variant="secondary" size="lg" iconStart={<Icon name="rotate" />} disabled={disableReplay} onClick={onReplay}>重播</Button>
       <Button variant="secondary" size="lg" iconStart={<Icon name="play" />} disabled={disableNext} onClick={onNext}>下一词</Button>
@@ -83,8 +83,8 @@ export function SessionTopActions({
 }) {
   return (
     <div className="page-actions">
-      <span className="chip"><span style={{ color: "var(--accent-success)" }}>●</span>&nbsp; 正确 {correctCount}</span>
-      <span className="chip"><span style={{ color: "var(--accent-error)" }}>●</span>&nbsp; 错 {wrongCount}</span>
+      <span className="chip session-stat-chip"><span className="session-stat-dot session-stat-dot-success">●</span>&nbsp; 正确 {correctCount}</span>
+      <span className="chip session-stat-chip"><span className="session-stat-dot session-stat-dot-error">●</span>&nbsp; 错 {wrongCount}</span>
       <Button variant="secondary" size="sm" iconStart={<Icon name="settings" size={15} />} onClick={onSettings}>
         设置
       </Button>

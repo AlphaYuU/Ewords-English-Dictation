@@ -1,0 +1,132 @@
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-card);
+  color: var(--foreground-tertiary);
+}
+
+.inline-search-wrap {
+  position: relative;
+}
+
+.search-suggest-panel {
+  position: absolute;
+  z-index: 100;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+  scrollbar-width: none;
+}
+
+.search-suggest-panel::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.sidebar-suggest-panel {
+  position: static;
+  width: 204px;
+  max-height: 220px;
+  margin-top: 6px;
+}
+
+.page-suggest-panel {
+  top: 50px;
+  right: 0;
+  width: 460px;
+  max-height: 340px;
+}
+
+.search-suggest-panel button {
+  display: grid;
+  width: 100%;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-card);
+  color: var(--foreground-primary);
+  text-align: left;
+}
+
+.search-suggest-panel button:first-child {
+  border-top: 0;
+}
+
+.search-suggest-panel button:hover {
+  background: var(--surface-muted);
+}
+
+.search-suggest-panel strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-suggest-panel span,
+.search-suggest-panel p {
+  overflow: hidden;
+  margin: 0;
+  color: var(--foreground-tertiary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-suggest-panel p {
+  padding: 12px;
+}
+
+.recent-search-list {
+  display: grid;
+  height: 534px;
+  max-height: 534px;
+  align-content: start;
+  grid-auto-rows: 48px;
+  overflow-y: auto;
+  gap: 6px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.recent-search-list::-webkit-scrollbar {
+  width: 8px;
+  height: 0;
+}
+
+.recent-search-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(93, 84, 76, 0.34);
+}
+
+.recent-search-list button {
+  display: grid;
+  height: 48px;
+  align-content: center;
+  gap: 3px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--foreground-primary);
+  padding: 6px 11px;
+  text-align: left;
+}
+
+.recent-search-list strong,
+.recent-search-list span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-search-list span {
+  color: var(--foreground-tertiary);
+  font-size: 12px;
+}
+

@@ -1,8 +1,8 @@
 import type { PointerEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import type { Accent, DictationResult, PlaybackSettings, PracticeSource, PracticeSourceGroup, VocabularyLibrary, VocabularyWord } from "@dictation/domain";
+import type { PracticeSource, PracticeSourceGroup, VocabularyWord } from "@dictation/domain";
 import {
   Button,
   Chip,
@@ -18,7 +18,6 @@ import {
   SessionTopActions,
   useModalA11y,
 } from "@dictation/ui";
-import { ControlledAudioService } from "@dictation/audio";
 import { summarizeResults } from "@dictation/domain";
 import { exportHistoryCsv } from "@dictation/import-export";
 import { saveTextFile } from "../services/desktop-bridge";
@@ -26,16 +25,20 @@ import { usePracticeStore } from "../stores/practice-store";
 import { resolveSetupWords } from "../stores/app-store";
 import { ChoiceCardGroup, SettingSwitch, SummaryTile } from "../features/practice/setup-components";
 import { estimateDurationLabel, panelStyle } from "../features/practice/setup-utils";
-import { DictationResultTable, PaperGradingTable } from "../features/practice/result-components";
+import { DictationResultTable, PaperGradingTable, PreviousResult } from "../features/practice/result-components";
 import { filterDictationResults, resultSummaryMeta, type ResultFilter } from "../features/practice/result-utils";
-
-const audio = new ControlledAudioService();
-
-type SourceChipItem = {
-  key: string;
-  label: string;
-  wordIds: number[];
-};
+import { useDictationAudioPrefetch, useDictationPlayback } from "../features/practice/playback-hooks";
+import {
+  buildWordSourceChips,
+  inferInitialLibraryId,
+  normalizeSourceGroups,
+  parsePracticeSource,
+  samePracticeSource,
+  sourceGroupForLibrary,
+  sourceLabel,
+  type SourceChipItem,
+  wordsForSourceLibrary,
+} from "../features/practice/source-utils";
 
 type SourceChipDragState = {
   pointerId: number;
@@ -375,94 +378,6 @@ export function PracticeSetupPage() {
   );
 }
 
-function parsePracticeSource(searchParams: URLSearchParams, resetWhenMissing: boolean): PracticeSource | null {
-  const sourceType = searchParams.get("source_type");
-  if (!sourceType) return resetWhenMissing ? { sourceType: "none" } : null;
-  if (sourceType === "none") return { sourceType: "none" };
-  if (sourceType === "wrong_book") return { sourceType: "wrong_book" };
-  if (sourceType === "favorite") return { sourceType: "favorite" };
-  if (sourceType === "library" || sourceType === "unit" || sourceType === "history_session") {
-    const sourceId = Number(searchParams.get("source_id"));
-    if (!Number.isFinite(sourceId)) return { sourceType: "none" };
-    if (sourceType === "history_session") {
-      const filter = searchParams.get("filter") === "wrong" ? "wrong" : searchParams.get("filter") === "all" ? "all" : undefined;
-      return filter ? { sourceType, sourceId, filter } : { sourceType, sourceId };
-    }
-    return { sourceType, sourceId };
-  }
-  if (sourceType === "words") {
-    const wordIds = (searchParams.get("word_ids") ?? "")
-      .split(",")
-      .map((item) => Number(item.trim()))
-      .filter(Number.isFinite);
-    return wordIds.length ? { sourceType: "words", wordIds } : { sourceType: "none" };
-  }
-  return { sourceType: "none" };
-}
-
-function samePracticeSource(left: PracticeSource, right: PracticeSource): boolean {
-  if (left.sourceType !== right.sourceType) return false;
-  if (left.sourceType === "history_session" && right.sourceType === "history_session") {
-    return left.sourceId === right.sourceId && left.filter === right.filter;
-  }
-  if ("sourceId" in left || "sourceId" in right) return "sourceId" in left && "sourceId" in right && left.sourceId === right.sourceId;
-  if ("wordIds" in left || "wordIds" in right) {
-    return "wordIds" in left && "wordIds" in right && left.wordIds.join(",") === right.wordIds.join(",");
-  }
-  return true;
-}
-
-function sourceLabel(source: PracticeSource, libraries: { id: number; name: string }[], units: { id: number; name: string }[]) {
-  if (source.sourceType === "library") return libraries.find((library) => library.id === source.sourceId)?.name ?? "词库";
-  if (source.sourceType === "unit") return units.find((unit) => unit.id === source.sourceId)?.name ?? "Unit";
-  if (source.sourceType === "wrong_book") return "错题本";
-  if (source.sourceType === "favorite") return "收藏夹";
-  if (source.sourceType === "history_session") return "历史记录";
-  if (source.sourceType === "words") return source.wordIds.length ? "多个来源" : "未选择";
-  return "未选择";
-}
-
-function buildWordSourceChips(words: VocabularyWord[], libraries: VocabularyLibrary[], sourceGroups?: PracticeSourceGroup[]): SourceChipItem[] {
-  if (!words.length) return [{ key: "none", label: "未选择来源", wordIds: [] }];
-  const wordIds = new Set(words.map((word) => word.id));
-  const grouped = normalizeSourceGroups(sourceGroups ?? [], [...wordIds]);
-  if (grouped.length) {
-    return grouped.map((group) => ({
-      key: group.key,
-      label: `${group.label} · ${group.wordIds.length}词`,
-      wordIds: group.wordIds,
-    }));
-  }
-  const counts = new Map<number, number>();
-  const wordIdsByLibrary = new Map<number, number[]>();
-  for (const word of words) {
-    counts.set(word.libraryId, (counts.get(word.libraryId) ?? 0) + 1);
-    wordIdsByLibrary.set(word.libraryId, [...(wordIdsByLibrary.get(word.libraryId) ?? []), word.id]);
-  }
-  return [...counts.entries()].map(([libraryId, count]) => ({
-    key: String(libraryId),
-    label: `${libraryId === 0 ? "词典" : libraries.find((library) => library.id === libraryId)?.name ?? "词库"} · ${count}词`,
-    wordIds: wordIdsByLibrary.get(libraryId) ?? [],
-  }));
-}
-
-function normalizeSourceGroups(groups: PracticeSourceGroup[], selectedWordIds: number[]): PracticeSourceGroup[] {
-  const selectedSet = new Set(selectedWordIds);
-  return groups
-    .map((group) => ({
-      ...group,
-      wordIds: [...new Set(group.wordIds.filter((wordId) => selectedSet.has(wordId)))],
-    }))
-    .filter((group) => group.wordIds.length);
-}
-
-function sourceGroupForLibrary(library: VocabularyLibrary | undefined): Pick<PracticeSourceGroup, "key" | "label"> {
-  if (!library) return { key: "unknown", label: "词库" };
-  if (library.type === "favorite") return { key: "favorite", label: "收藏夹" };
-  if (library.type === "wrong_book") return { key: "wrong_book", label: "错题本" };
-  return { key: `library:${library.id}`, label: library.name };
-}
-
 export function PracticeSourcePickerPage() {
   const navigate = useNavigate();
   const setup = usePracticeStore((state) => state.setup);
@@ -757,171 +672,6 @@ export function PracticeSetupListPage() {
   );
 }
 
-function inferInitialLibraryId(source: PracticeSource, selectedWords: VocabularyWord[], libraries: VocabularyLibrary[]): number {
-  if (source.sourceType === "library") return source.sourceId;
-  if (source.sourceType === "wrong_book") return libraries.find((library) => library.type === "wrong_book")?.id ?? libraries[0]?.id ?? 0;
-  if (source.sourceType === "favorite") return libraries.find((library) => library.type === "favorite")?.id ?? libraries[0]?.id ?? 0;
-  if (selectedWords[0]) return selectedWords[0].libraryId;
-  return libraries.find((library) => library.type === "official" || library.type === "custom")?.id ?? libraries[0]?.id ?? 0;
-}
-
-function wordsForSourceLibrary(library: VocabularyLibrary, words: VocabularyWord[]): VocabularyWord[] {
-  if (library.type === "wrong_book") return words.filter((word) => word.inWrongBook || word.wrongCount > 0);
-  if (library.type === "favorite") return words.filter((word) => word.isFavorite);
-  return words.filter((word) => word.libraryId === library.id);
-}
-
-function useDictationPlayback({
-  current,
-  accent,
-  settings,
-  onAutoAdvance,
-}: {
-  current?: Pick<DictationResult, "id" | "wordId" | "word" | "result">;
-  accent: Accent;
-  settings: PlaybackSettings;
-  onAutoAdvance?: () => void;
-}) {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [scheduledCount, setScheduledCount] = useState(0);
-  const runIdRef = useRef(0);
-  const scheduledCountRef = useRef(0);
-  const autoAdvanceRef = useRef(onAutoAdvance);
-  const playingRef = useRef(false);
-  const currentId = current?.id;
-  const currentWordId = current?.wordId;
-  const currentWord = current?.word;
-
-  useEffect(() => {
-    autoAdvanceRef.current = onAutoAdvance;
-  }, [onAutoAdvance]);
-
-  const waitInterval = useCallback((runId: number) =>
-    new Promise<boolean>((resolve) => {
-      const timer = window.setTimeout(() => resolve(runIdRef.current === runId), settings.intervalSec * 1000);
-      if (runIdRef.current !== runId) {
-        window.clearTimeout(timer);
-        resolve(false);
-      }
-    }), [settings.intervalSec]);
-
-  const playOnce = useCallback(async (target: Pick<DictationResult, "id" | "wordId" | "word">, runId?: number): Promise<boolean> => {
-    while (playingRef.current) {
-      await new Promise((resolve) => window.setTimeout(resolve, 80));
-    }
-    if (runId != null && runIdRef.current !== runId) return false;
-    playingRef.current = true;
-    setIsPlaying(true);
-    try {
-      await audio.play({ wordId: target.wordId, word: target.word, accent, speed: settings.speed });
-      return true;
-    } catch (error) {
-      console.warn("Piper playback failed", error);
-      return false;
-    } finally {
-      playingRef.current = false;
-      setIsPlaying(false);
-    }
-  }, [accent, settings.speed]);
-
-  const runTimeline = useCallback(async (runId: number, target: Pick<DictationResult, "id" | "wordId" | "word">) => {
-    while (runIdRef.current === runId && scheduledCountRef.current < settings.playCount) {
-      scheduledCountRef.current += 1;
-      setScheduledCount(scheduledCountRef.current);
-      const played = await playOnce(target, runId);
-      if (!played) return;
-      const shouldContinue = await waitInterval(runId);
-      if (!shouldContinue) return;
-    }
-    if (runIdRef.current === runId && settings.autoPlayNext) autoAdvanceRef.current?.();
-  }, [playOnce, settings.autoPlayNext, settings.playCount, waitInterval]);
-
-  useEffect(() => {
-    if (currentId == null || currentWordId == null || !currentWord) return;
-    const target = { id: currentId, wordId: currentWordId, word: currentWord };
-    const runId = runIdRef.current + 1;
-    runIdRef.current = runId;
-    scheduledCountRef.current = 0;
-    const resetTimer = window.setTimeout(() => setScheduledCount(0), 0);
-    void runTimeline(runId, target);
-    return () => {
-      window.clearTimeout(resetTimer);
-      runIdRef.current += 1;
-      void audio.stop();
-      playingRef.current = false;
-      setIsPlaying(false);
-    };
-  }, [currentId, currentWordId, currentWord, runTimeline]);
-
-  const replay = () => {
-    if (!current || isPlaying) return;
-    if (current.result !== "unmarked") {
-      void playOnce(current);
-      return;
-    }
-    if (settings.allowReplay) {
-      void playOnce(current);
-      return;
-    }
-    if (scheduledCountRef.current >= settings.playCount) return;
-    const runId = runIdRef.current + 1;
-    runIdRef.current = runId;
-    scheduledCountRef.current += 1;
-    setScheduledCount(scheduledCountRef.current);
-    void (async () => {
-      const played = await playOnce(current, runId);
-      if (!played) return;
-      const shouldContinue = await waitInterval(runId);
-      if (!shouldContinue) return;
-      if (scheduledCountRef.current >= settings.playCount) {
-        if (settings.autoPlayNext) autoAdvanceRef.current?.();
-        return;
-      }
-      await runTimeline(runId, current);
-    })();
-  };
-
-  return {
-    isPlaying,
-    replay,
-    canReplay: Boolean(current && !isPlaying && (current.result !== "unmarked" || settings.allowReplay || scheduledCount < settings.playCount)),
-  };
-}
-
-function useDictationAudioPrefetch({
-  results,
-  sessionIndex,
-  accent,
-  speed,
-}: {
-  results: Pick<DictationResult, "wordId" | "word">[];
-  sessionIndex: number;
-  accent: Accent;
-  speed: PlaybackSettings["speed"];
-}) {
-  const preparedRef = useRef(new Set<string>());
-
-  useEffect(() => {
-    let cancelled = false;
-    const upcoming = results.slice(sessionIndex + 1, sessionIndex + 5);
-    if (!upcoming.length) return undefined;
-    void (async () => {
-      await new Promise((resolve) => window.setTimeout(resolve, 650));
-      for (const result of upcoming) {
-        if (cancelled) return;
-        const key = `${result.wordId}:${result.word}:${accent}:${speed}`;
-        if (preparedRef.current.has(key)) continue;
-        preparedRef.current.add(key);
-        await audio.prepare({ wordId: result.wordId, word: result.word, accent, speed });
-        await new Promise((resolve) => window.setTimeout(resolve, 80));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [accent, results, sessionIndex, speed]);
-}
-
 export function PracticeEmptyPage() {
   const navigate = useNavigate();
   return <EmptyState title="还没有选择来源" description="请先选择词库、Unit、错题本或收藏夹。" action={<Button onClick={() => navigate("/practice/source-picker")}>选择来源</Button>} />;
@@ -1123,22 +873,6 @@ export function DictationSessionTypingPage() {
 
 function formatSessionSourceName(sourceName: string): string {
   return sourceName.split("·")[0]?.trim() || sourceName;
-}
-
-function PreviousResult({ result }: { result: { result: string; word: string; correctAnswer: string; meaning: string } }) {
-  const isCorrect = result.result === "correct";
-  return (
-    <div className="previous-result">
-      <span className={`previous-result-mark ${isCorrect ? "is-correct" : "is-wrong"}`}>{isCorrect ? "✓" : "!"}</span>
-      <div>
-        <p>
-          上一题 · {isCorrect ? "正确" : "错误"}
-        </p>
-        <strong>{result.correctAnswer || result.word}</strong>
-        <span> · {result.meaning}</span>
-      </div>
-    </div>
-  );
 }
 
 export function DictationSessionPaperPage() {
