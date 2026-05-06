@@ -42,3 +42,10 @@ corepack pnpm dev
 ```bash
 corepack pnpm package:win
 ```
+
+
+## License
+
+The original source code of this project is licensed under the Apache License 2.0.
+
+Third-party data, TTS runtime files, voice models, and bundled resources remain under their original licenses. See `THIRD_PARTY_NOTICES.md` for details.
