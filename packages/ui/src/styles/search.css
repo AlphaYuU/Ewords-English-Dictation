@@ -29,10 +29,12 @@
 }
 
 .sidebar-suggest-panel {
-  position: static;
+  position: absolute;
+  top: 42px;
+  left: 0;
   width: 204px;
   max-height: 220px;
-  margin-top: 6px;
+  margin-top: 0;
 }
 
 .page-suggest-panel {
