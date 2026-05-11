@@ -17,6 +17,10 @@ The original source code of this project is licensed under the Apache License 2.
 
 Third-party data, TTS runtime files, voice models, and bundled resources remain under their original licenses. See `THIRD_PARTY_NOTICES.md` for details.
 
+## Demo
+
+https://www.lemyu.com/projects/dictation
+
 ## Development
 
 安装依赖：
