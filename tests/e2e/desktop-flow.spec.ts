@@ -313,6 +313,23 @@ test("sidebar search opens dictionary entry detail without a search page", async
   await expect(page.locator(".back-link")).toContainText("词典 / ability");
 });
 
+test("sidebar search suggestions do not push navigation items down", async ({ page }) => {
+  await page.goto("/library");
+  const workspaceLabel = page.locator(".sidebar-section-label").filter({ hasText: "Workspace" });
+  const workspaceTopBefore = await workspaceLabel.evaluate((element) => element.getBoundingClientRect().top);
+
+  await page.locator(".sidebar-search").getByPlaceholder("搜索词库 / 单词").fill("ability");
+  const suggestions = page.locator(".sidebar-suggest-panel");
+  await expect(suggestions).toBeVisible();
+  await expect(suggestions.getByText("ability", { exact: true })).toBeVisible();
+
+  const panelPosition = await suggestions.evaluate((element) => getComputedStyle(element).position);
+  const workspaceTopAfter = await workspaceLabel.evaluate((element) => element.getBoundingClientRect().top);
+
+  expect(panelPosition).toBe("absolute");
+  expect(Math.abs(workspaceTopAfter - workspaceTopBefore)).toBeLessThan(1);
+});
+
 test("favorite and wrong-book pins become active on their pages", async ({ page }) => {
   await page.goto("/favorites");
   await expect(page.locator(".sidebar-pin-item.is-active").filter({ hasText: "收藏夹" })).toBeVisible();

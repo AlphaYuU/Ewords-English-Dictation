@@ -64,7 +64,7 @@ export function SettingsPage() {
             <div className="settings-about-list">
               <SettingItem title="应用名称" value="Ewords" />
               <SettingItem title="软件作者" value="Lemon" />
-              <SettingItem title="当前版本" value="v1.0.1" />
+              <SettingItem title="当前版本" value="v1.0.2" />
               <SettingItem title="数据来源" value="ECDICT、Tatoeba、Piper TTS" />
               <SettingItem title="授权协议" value="MIT、CC BY 2.0 FR / CC0" />
             </div>
